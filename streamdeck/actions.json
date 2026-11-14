@@ -1,0 +1,62 @@
+[
+  {
+    "id": "lead.record",
+    "label": "Record",
+    "title": "Record",
+    "group": "Lead",
+    "kind": "pulse",
+    "effect": "lead_record",
+    "value": true,
+    "action": 1
+  },
+  {
+    "id": "lead.appear",
+    "label": "Appear",
+    "title": "Appear",
+    "group": "Lead",
+    "kind": "pulse",
+    "effect": "lead_appear",
+    "value": true,
+    "action": 2
+  },
+  {
+    "id": "lead.spot",
+    "label": "Chase spot",
+    "title": "Spot",
+    "group": "Lead",
+    "kind": "pulse",
+    "effect": "lead_spot",
+    "value": true,
+    "action": 3
+  },
+  {
+    "id": "lead.teleport",
+    "label": "Teleport",
+    "title": "Teleport",
+    "group": "Lead",
+    "kind": "pulse",
+    "effect": "lead_teleport",
+    "value": true,
+    "action": 4
+  },
+  {
+    "id": "lead.start",
+    "label": "Start",
+    "title": "Start",
+    "group": "Lead",
+    "kind": "pulse",
+    "effect": "lead_start",
+    "value": true,
+    "action": 5
+  },
+  {
+    "id": "lead.clear",
+    "label": "Clear lead",
+    "title": "Clear",
+    "group": "Lead",
+    "kind": "pulse",
+    "effect": "lead_clear",
+    "value": true,
+    "action": 6
+  }
+]
