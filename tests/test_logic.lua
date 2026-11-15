@@ -347,6 +347,82 @@ do
   check('playback blends the wiper position', math.abs(mid.wipers - expect) < 1e-6)
 end
 
+local car_data = dofile('apps/lua/solo_tandems/car_data.lua')
+
+do
+  local spec = car_data.parse('[CONTROLS]\nSTEER_LOCK=520\n', '[FRONT]\nRADIUS=0.31\n[REAR]\nRADIUS=0.34\n')
+  check('the car file gives the steering lock', spec.steer_lock == 520)
+  check('the car file gives the front tyre size', math.abs(spec.radius_front - 0.31) < 1e-9)
+  check('the car file gives the rear tyre size', math.abs(spec.radius_rear - 0.34) < 1e-9)
+  local plain = car_data.parse('', '')
+  check('a missing car file keeps the old steering lock', plain.steer_lock == 450)
+  check('a missing car file keeps the old tyre size', plain.radius_front == 0.33 and plain.radius_rear == 0.33)
+end
+
+local car_lights = dofile('apps/lua/solo_tandems/car_lights.lua')
+
+do
+  local dir = 'tests/tmp_lights'
+  os.execute('mkdir -p ' .. dir .. '/extension')
+  local file = io.open(dir .. '/extension/taillights.ini', 'w')
+  file:write([[
+[EMISSIVE_REVERSE_0]
+NAME=rev
+COLOR=25, 25, 25
+FALLBACK_BRAKES_COLOR=15, 0, 0
+FALLBACK_BRAKES_COLOR_HIGHER=1
+
+[EMISSIVE_TURNSIGNAL_LEFT_0]
+NAME=ind_l
+COLOR=20, 10, 0
+FALLBACK_HEADLIGHTS_COLOR=5, 0, 0
+]])
+  file:close()
+  local data = car_lights.load(dir)
+  os.execute('rm -rf ' .. dir)
+  check('a reverse lens is read from the car', data.reverse[1] == 'rev')
+  check('a blinker lens is read from the car', data.turn_left[1] == 'ind_l')
+  local reverse_color = car_lights.active_color(data.reverse_entries[1], { reverse = 1 })
+  check('reverse uses the reverse color', reverse_color ~= nil and reverse_color.r > 0.9 and reverse_color.g > 0.9)
+  local brake_color = car_lights.active_color(data.reverse_entries[1], { reverse = 1, brake = 1 })
+  check('brakes replace reverse when the car says so', brake_color ~= nil and brake_color.r > brake_color.g)
+  local parked = car_lights.active_color(data.turn_left_entries[1], { left = 1, blink = 0, head = 1 })
+  check('a blinker at rest can sit as a tail light', parked ~= nil and parked.r > parked.g)
+  local flashing = car_lights.active_color(data.turn_left_entries[1], { left = 1, blink = 1, head = 1 })
+  check('a lit blinker uses the blinker color', flashing ~= nil and flashing.g > parked.g)
+end
+
+do
+  local state = logic.create()
+  logic.handle(state, logic.RECORD, two)
+  local first = pose(1, 0, 0)
+  first.lights = { head = 1, high = 0, left = 1, right = 0, blink = 1 }
+  first.gear = 1
+  local second = pose(2, 0, 0)
+  second.lights = { head = 0, high = 1, left = 0, right = 1, blink = 0 }
+  second.gear = -1
+  logic.capture(state, 1 / 30, first)
+  logic.capture(state, 1 / 30, second)
+  logic.handle(state, logic.RECORD, two)
+  check('a sample keeps the headlights', state.samples[1].lights.head == 1 and state.samples[1].lights.left == 1)
+  check('a sample keeps the blink', state.samples[1].lights.blink == 1)
+  logic.handle(state, logic.SPAWN, two)
+  local held = logic.lead_position(state, 0)
+  check('a waiting lead keeps the headlights', held.lights.head == 1 and held.lights.blink == 1)
+  logic.handle(state, logic.START, two)
+  local mid
+  local guard = 0
+  repeat
+    mid = logic.lead_position(state, 1 / 120)
+    guard = guard + 1
+  until guard > 30 or (state.play_t > state.samples[1].t and state.play_t < state.samples[2].t)
+  check('playback keeps the recorded light state', mid.lights.head == 1 and mid.lights.high == 0 and mid.lights.blink == 1)
+  local dark = logic.create()
+  logic.handle(dark, logic.RECORD, two)
+  logic.capture(dark, 1 / 30, pose(0, 0, 0))
+  check('a missing light reading is off', dark.samples[1].lights.head == 0 and dark.samples[1].lights.blink == 0)
+end
+
 local smoke = dofile('apps/lua/solo_tandems/smoke.lua')
 
 do

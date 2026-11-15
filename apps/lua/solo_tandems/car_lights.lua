@@ -30,9 +30,15 @@ local function empty_data()
     headlights = {},
     taillights = {},
     brakelights = {},
+    reverse = {},
+    turn_left = {},
+    turn_right = {},
     headlight_entries = {},
     taillight_entries = {},
     brake_entries = {},
+    reverse_entries = {},
+    turn_left_entries = {},
+    turn_right_entries = {},
   }
 end
 
@@ -143,10 +149,21 @@ local function read_extension(car_folder, result)
       end
 
       local color, intensity = parse_ext_color(kv.COLOR)
+      local fallback_head, fallback_head_intensity = parse_ext_color(kv.FALLBACK_HEADLIGHTS_COLOR)
+      local fallback_high, fallback_high_intensity = parse_ext_color(kv.FALLBACK_HIGHBEAM_COLOR)
+      local fallback_brake, fallback_brake_intensity = parse_ext_color(kv.FALLBACK_BRAKES_COLOR)
       local entry = {
         mesh = kv.NAME or '',
         color = color,
         color_intensity = intensity or 0,
+        fallback_head = fallback_head,
+        fallback_head_intensity = fallback_head_intensity or 0,
+        fallback_high = fallback_high,
+        fallback_high_intensity = fallback_high_intensity or 0,
+        fallback_brake = fallback_brake,
+        fallback_brake_intensity = fallback_brake_intensity or 0,
+        brake_higher = kv.FALLBACK_BRAKES_COLOR_HIGHER == '1',
+        off_color = select(1, parse_ext_color(kv.OFF_COLOR)),
         position = parse_vec3(kv.POSITION),
         direction = parse_vec3(kv.DIRECTION),
         range = tonumber(kv.RANGE),
@@ -158,21 +175,35 @@ local function read_extension(car_folder, result)
         source = 'extension',
       }
 
-      if sec_upper:find('LIGHT_BRAKE', 1, true) then
+      local function add_meshes(list)
+        if entry.mesh == '' then return end
+        for name in entry.mesh:gmatch('[^,%s]+') do
+          list[#list + 1] = name
+        end
+      end
+
+      if sec_upper:find('TURNSIGNAL', 1, true) and sec_upper:find('LEFT', 1, true) then
+        entry.role = 'left'
+        result.turn_left_entries[#result.turn_left_entries + 1] = entry
+        add_meshes(result.turn_left)
+      elseif sec_upper:find('TURNSIGNAL', 1, true) and sec_upper:find('RIGHT', 1, true) then
+        entry.role = 'right'
+        result.turn_right_entries[#result.turn_right_entries + 1] = entry
+        add_meshes(result.turn_right)
+      elseif sec_upper:find('REVERSE', 1, true) then
+        entry.role = 'reverse'
+        result.reverse_entries[#result.reverse_entries + 1] = entry
+        add_meshes(result.reverse)
+      elseif sec_upper:find('LIGHT_BRAKE', 1, true) then
+        entry.role = 'brake'
         result.brake_entries[#result.brake_entries + 1] = entry
-        if entry.mesh ~= '' then
-          for name in entry.mesh:gmatch('[^,%s]+') do
-            result.brakelights[#result.brakelights + 1] = name
-          end
-        end
+        add_meshes(result.brakelights)
       elseif sec_upper:find('LIGHT_HEADLIGHT', 1, true) then
+        entry.role = 'head'
         result.headlight_entries[#result.headlight_entries + 1] = entry
-        if entry.mesh ~= '' then
-          for name in entry.mesh:gmatch('[^,%s]+') do
-            result.headlights[#result.headlights + 1] = name
-          end
-        end
+        add_meshes(result.headlights)
       elseif file_type == 'taillights' and sec_upper:find('EMISSIVE', 1, true) then
+        entry.role = 'tail'
         local brake_color, brake_intensity = parse_ext_color(kv.FALLBACK_BRAKES_COLOR)
         if kv.NAME then
           for name in kv.NAME:gmatch('[^,%s]+') do
@@ -271,7 +302,52 @@ function M.load(car_folder)
   result.headlights = dedup(result.headlights)
   result.taillights = dedup(result.taillights)
   result.brakelights = dedup(result.brakelights)
+  result.reverse = dedup(result.reverse)
+  result.turn_left = dedup(result.turn_left)
+  result.turn_right = dedup(result.turn_right)
   return result
+end
+
+local function light_flag(state, name)
+  if type(state) ~= 'table' then return false end
+  local value = state[name]
+  return value == true or value == 1
+end
+
+function M.active_color(entry, state)
+  if type(entry) ~= 'table' then return nil, 0 end
+  local role = entry.role or 'tail'
+  local primary = false
+  if role == 'head' then
+    primary = light_flag(state, 'head') or light_flag(state, 'high')
+  elseif role == 'tail' then
+    primary = light_flag(state, 'head')
+  elseif role == 'brake' then
+    primary = light_flag(state, 'brake')
+  elseif role == 'reverse' then
+    primary = light_flag(state, 'reverse')
+  elseif role == 'left' then
+    primary = light_flag(state, 'left') and light_flag(state, 'blink')
+  elseif role == 'right' then
+    primary = light_flag(state, 'right') and light_flag(state, 'blink')
+  end
+  if entry.brake_higher and light_flag(state, 'brake') and entry.fallback_brake then
+    return entry.fallback_brake, entry.fallback_brake_intensity or 0
+  end
+  if primary and entry.color then
+    return entry.color, entry.color_intensity or 0
+  end
+  if light_flag(state, 'brake') and entry.fallback_brake then
+    return entry.fallback_brake, entry.fallback_brake_intensity or 0
+  end
+  if light_flag(state, 'high') and entry.fallback_high then
+    return entry.fallback_high, entry.fallback_high_intensity or 0
+  end
+  if light_flag(state, 'head') and entry.fallback_head then
+    return entry.fallback_head, entry.fallback_head_intensity or 0
+  end
+  if entry.off_color then return entry.off_color, 0 end
+  return nil, 0
 end
 
 function M.entry_light_color(entry, base_scale)

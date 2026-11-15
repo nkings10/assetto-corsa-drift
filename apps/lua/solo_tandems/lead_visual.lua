@@ -14,6 +14,7 @@ local function sibling(name)
 end
 
 local car_lights = sibling('car_lights.lua')
+local car_data = sibling('car_data.lua')
 local wetness = sibling('wetness.lua')
 local height = sibling('height.lua')
 local wipers = sibling('wipers.lua')
@@ -25,6 +26,11 @@ local all_meshes = nil
 local ready = false
 local loaded_id = nil
 local car_folder = nil
+local car_spec = {
+  steer_lock = car_data.DEFAULT_LOCK,
+  radius_front = car_data.DEFAULT_RADIUS,
+  radius_rear = car_data.DEFAULT_RADIUS,
+}
 local status = 'idle'
 local was_hidden = true
 local ground_offset = 0.05
@@ -56,6 +62,12 @@ local exterior_meshes = nil
 local tyre_meshes = nil
 local brake_on = false
 local lights_on = false
+local beams_on = false
+local tails_on = false
+local beam_state = ''
+local reverse_meshes = nil
+local left_meshes = nil
+local right_meshes = nil
 local wet_applied = false
 local last_wet = -1
 local wet_saved = nil
@@ -282,6 +294,9 @@ local function find_meshes(root)
   brake_meshes = find_named_meshes(root, light_data.brakelights)
   head_meshes = find_named_meshes(root, light_data.headlights)
   tail_meshes = find_named_meshes(root, light_data.taillights)
+  reverse_meshes = find_named_meshes(root, light_data.reverse)
+  left_meshes = find_named_meshes(root, light_data.turn_left)
+  right_meshes = find_named_meshes(root, light_data.turn_right)
 
   if head_meshes == nil then
     head_meshes = grab({
@@ -582,19 +597,34 @@ local function apply_running_emissive()
   end
 end
 
-local function set_running_lights(on)
-  if on == lights_on then return end
-  lights_on = on
-  if on then
+local function set_running_lights(head_on, high_on)
+  head_on = head_on == true
+  high_on = high_on == true
+  local key = (head_on and 'h' or '-') .. (high_on and 'H' or '-')
+  if key == beam_state then return end
+  beam_state = key
+  beams_on = head_on or high_on
+  tails_on = head_on
+  lights_on = beams_on
+  if beams_on then
     ensure_running_light_sources()
-    apply_running_emissive()
+    local hl = head_emissive_level()
+    if high_on then hl = hl * 1.6 end
+    set_emissive(head_meshes, true, hl, hl * 0.3)
   else
     set_emissive(head_meshes, false, 0, 0)
+    hide_light(head_l)
+    hide_light(head_r)
+  end
+  if tails_on then
+    if not brake_on or brake_meshes ~= tail_meshes then
+      local tl = tail_emissive_level()
+      set_emissive(tail_meshes, true, tl, tl * 0.25)
+    end
+  else
     if not brake_on then
       set_emissive(tail_meshes, false, 0, 0)
     end
-    hide_light(head_l)
-    hide_light(head_r)
     hide_light(tail_light)
   end
 end
@@ -613,28 +643,33 @@ local function local_dir_to_world(look, up, side, local_dir)
 end
 
 local function update_running_lights(look, up, side, pos)
-  if not lights_on or look == nil or up == nil or side == nil or pos == nil then
+  if look == nil or up == nil or side == nil or pos == nil or (not beams_on and not tails_on) then
     hide_light(head_l)
     hide_light(head_r)
     hide_light(tail_light)
     return
   end
   ensure_running_light_sources()
-  if head_l == nil then return end
-
+  if not beams_on then
+    hide_light(head_l)
+    hide_light(head_r)
+  end
+  if not tails_on then
+    hide_light(tail_light)
+  end
   local hl_entries = (light_data and light_data.headlight_entries) or {}
   local tl_entries = (light_data and light_data.taillight_entries) or {}
   local size = vec3(1.8, 1.3, 4.5)
   local head_dir = (look - up * 0.08):normalize()
 
-  if #hl_entries >= 2 and valid_local_pos(hl_entries[1].position) and valid_local_pos(hl_entries[2].position) then
+  if beams_on and head_l ~= nil and #hl_entries >= 2 and valid_local_pos(hl_entries[1].position) and valid_local_pos(hl_entries[2].position) then
     head_l.position = local_to_world(pos, look, up, side, hl_entries[1].position)
     head_l.direction = hl_entries[1].direction and local_dir_to_world(look, up, side, hl_entries[1].direction) or head_dir
     if head_r then
       head_r.position = local_to_world(pos, look, up, side, hl_entries[2].position)
       head_r.direction = hl_entries[2].direction and local_dir_to_world(look, up, side, hl_entries[2].direction) or head_dir
     end
-  elseif #hl_entries >= 1 and valid_local_pos(hl_entries[1].position) then
+  elseif beams_on and head_l ~= nil and #hl_entries >= 1 and valid_local_pos(hl_entries[1].position) then
     local lp = hl_entries[1].position
     local dir = hl_entries[1].direction and local_dir_to_world(look, up, side, hl_entries[1].direction) or head_dir
     head_l.position = local_to_world(pos, look, up, side, lp)
@@ -643,7 +678,7 @@ local function update_running_lights(look, up, side, pos)
       head_r.position = local_to_world(pos, look, up, side, { x = -lp.x, y = lp.y, z = lp.z })
       head_r.direction = dir
     end
-  else
+  elseif beams_on and head_l ~= nil then
     local front = pos + look * (size.z * 0.48) + up * (size.y * 0.42)
     local side_off = size.x * 0.35
     head_l.position = front + side * side_off
@@ -654,7 +689,7 @@ local function update_running_lights(look, up, side, pos)
     end
   end
 
-  if tail_light == nil then return end
+  if not tails_on or tail_light == nil then return end
   local avg_x, avg_y, avg_z, count = 0, 0, 0, 0
   for i = 1, #tl_entries do
     local e = tl_entries[i]
@@ -813,8 +848,8 @@ local function update_smoke(pose, look, side, pos, dt)
   local slip_x = side.x * slip_sign * speed * 0.006
   local slip_z = side.z * slip_sign * speed * 0.006
 
-  local rl_x, rl_y, rl_z = smoke.contact(pos, look, side, wheel_world(3), 1)
-  local rr_x, rr_y, rr_z = smoke.contact(pos, look, side, wheel_world(4), -1)
+  local rl_x, rl_y, rl_z = smoke.contact(pos, look, side, wheel_world(3), 1, car_spec.radius_rear)
+  local rr_x, rr_y, rr_z = smoke.contact(pos, look, side, wheel_world(4), -1, car_spec.radius_rear)
 
   local main_amount = 0.8 + intensity * 3.5
   for i = 1, 2 do
@@ -910,8 +945,8 @@ local function compute_ground_offset()
     node:setOrientation(vec3(0, 0, 1), vec3(0, 1, 0))
   end)
   local sum, count = 0, 0
-  local radius = 0.33
   for i = 1, 4 do
+    local radius = i <= 2 and car_spec.radius_front or car_spec.radius_rear
     local ref = tyre_ref[i] or wheel_ref[i]
     if ref ~= nil then
       local ok, world_y = pcall(function()
@@ -1177,7 +1212,11 @@ function M.ensure(car_id)
   end)
   find_parts(node)
   find_meshes(node)
+  car_spec = car_data.load(car_folder)
   lights_on = false
+  beams_on = false
+  tails_on = false
+  beam_state = ''
   brake_on = false
   set_emissive(head_meshes, false, 0, 0)
   set_emissive(tail_meshes, false, 0, 0)
@@ -1198,6 +1237,42 @@ function M.ensure(car_id)
   return true
 end
 
+local function names_inside(special, general)
+  if type(special) ~= 'table' or #special == 0 then return false end
+  local have = {}
+  for i = 1, #(general or {}) do
+    have[general[i]] = true
+  end
+  for i = 1, #special do
+    if not have[special[i]] then return false end
+  end
+  return true
+end
+
+local function apply_role_meshes(meshes, names, entry, state)
+  if meshes == nil or entry == nil then return end
+  local color, intensity = car_lights.active_color(entry, state)
+  if color == nil then
+    if names_inside(names, light_data and light_data.taillights) and tails_on then
+      return
+    end
+    set_emissive(meshes, false, 0, 0)
+    return
+  end
+  local level = 60
+  if type(intensity) == 'number' and intensity > 0 then
+    level = math.min(intensity / 255 * 60, 300)
+  end
+  set_emissive(meshes, true, level, level * 0.25)
+end
+
+local function update_signal_lights(state)
+  if light_data == nil then return end
+  apply_role_meshes(reverse_meshes, light_data.reverse, light_data.reverse_entries[1], state)
+  apply_role_meshes(left_meshes, light_data.turn_left, light_data.turn_left_entries[1], state)
+  apply_role_meshes(right_meshes, light_data.turn_right, light_data.turn_right_entries[1], state)
+end
+
 function M.hide()
   if node ~= nil then
     pcall(function()
@@ -1207,6 +1282,7 @@ function M.hide()
   end
   set_running_lights(false)
   set_brake_visual(false, nil, nil, nil, nil)
+  update_signal_lights({})
   stop_sound()
   spin[1], spin[2], spin[3], spin[4] = 0, 0, 0, 0
   steer_smooth = 0
@@ -1248,11 +1324,11 @@ function M.show(pose, dt)
 
   local target_steer = (pose.steer or 0) * math.rad(32)
   steer_smooth = steer_smooth + (target_steer - steer_smooth) * math.min(1, dt * 10)
-  apply_steer_wheel((pose.steer or 0) * math.rad(450))
+  apply_steer_wheel((pose.steer or 0) * math.rad(car_spec.steer_lock))
 
   local spd = speed_ms(pose.vel)
-  local radius = 0.33
   for i = 1, 4 do
+    local radius = i <= 2 and car_spec.radius_front or car_spec.radius_rear
     local omega = pose.wheels and pose.wheels[i] or 0
     if math.abs(omega) < 0.01 then omega = spd / radius end
     if spd < 0.3 then omega = 0 end
@@ -1272,9 +1348,21 @@ function M.show(pose, dt)
   end
 
   update_wipers(pose)
-  set_running_lights(true)
+  local recorded_lights = pose.lights or {}
+  local head_on = recorded_lights.head == 1
+  local high_on = recorded_lights.high == 1
+  set_running_lights(head_on, high_on)
   update_running_lights(look, up, side, pos)
   set_brake_visual((pose.brake or 0) > 0.08, look, up, side, pos)
+  update_signal_lights({
+    head = head_on and 1 or 0,
+    high = high_on and 1 or 0,
+    brake = (pose.brake or 0) > 0.08 and 1 or 0,
+    reverse = (pose.gear or 0) < 0 and 1 or 0,
+    left = recorded_lights.left,
+    right = recorded_lights.right,
+    blink = recorded_lights.blink,
+  })
   update_smoke(pose, look, side, pos, dt)
   update_wetness()
   update_sound(pose, look, pos)
@@ -1282,13 +1370,11 @@ end
 
 function M.draw_glows()
   if not ready or was_hidden or render == nil or render.mesh == nil then return end
-  if lights_on then
-    if glow_head.meshes ~= nil then
-      pcall(render.mesh, glow_head)
-    end
-    if glow_tail.meshes ~= nil and not brake_on then
-      pcall(render.mesh, glow_tail)
-    end
+  if beams_on and glow_head.meshes ~= nil then
+    pcall(render.mesh, glow_head)
+  end
+  if tails_on and glow_tail.meshes ~= nil and not brake_on then
+    pcall(render.mesh, glow_tail)
   end
   if brake_on then
     glow_brake.meshes = brake_meshes or tail_meshes

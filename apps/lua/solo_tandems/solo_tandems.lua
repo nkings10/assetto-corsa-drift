@@ -233,6 +233,13 @@ local function read_pose(car)
     speed = car.speedKmh or math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) * 3.6,
     wheels = read_wheels(car),
     wipers = car.wiperProgress or 0,
+    lights = {
+      head = car.headlightsActive and 1 or 0,
+      high = car.highBeams and 1 or 0,
+      left = (car.turningLeftLights or car.hazardLights) and 1 or 0,
+      right = (car.turningRightLights or car.hazardLights) and 1 or 0,
+      blink = car.turningLightsActivePhase and 1 or 0,
+    },
   }
 end
 

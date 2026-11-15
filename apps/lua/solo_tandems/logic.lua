@@ -78,6 +78,21 @@ local function vec_ok(v)
     and type(v.z) == 'number'
 end
 
+local function copy_lights(lights)
+  lights = type(lights) == 'table' and lights or {}
+  local function bit(value)
+    if value == true or value == 1 then return 1 end
+    return 0
+  end
+  return {
+    head = bit(lights.head),
+    high = bit(lights.high),
+    left = bit(lights.left),
+    right = bit(lights.right),
+    blink = bit(lights.blink),
+  }
+end
+
 local function pose_copy(pose)
   local dir = normalize(pose.dir)
   local up = copy_up(pose.up)
@@ -96,6 +111,7 @@ local function pose_copy(pose)
     speed = pose.speed or 0,
     wheels = copy_wheels(pose.wheels),
     wipers = pose.wipers or 0,
+    lights = copy_lights(pose.lights),
   }
 end
 
@@ -115,6 +131,7 @@ local function hold_pose(sample)
     speed = 0,
     wheels = { 0, 0, 0, 0 },
     wipers = sample.wipers or 0,
+    lights = copy_lights(sample.lights),
   }
 end
 
@@ -301,6 +318,7 @@ function M.lead_position(state, dt)
       speed = first.speed or 0,
       wheels = copy_wheels(first.wheels),
       wipers = first.wipers or 0,
+      lights = copy_lights(first.lights),
     }, 'play'
   end
   if last.t - state.play_t <= 0.0001 then
@@ -342,6 +360,7 @@ function M.lead_position(state, dt)
     speed = (a.speed or 0) + ((b.speed or 0) - (a.speed or 0)) * u,
     wheels = lerp_wheels(a.wheels, b.wheels, u),
     wipers = (a.wipers or 0) + ((b.wipers or 0) - (a.wipers or 0)) * u,
+    lights = copy_lights(a.lights),
   }, 'play'
 end
 
