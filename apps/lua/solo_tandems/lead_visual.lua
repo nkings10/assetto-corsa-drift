@@ -1076,6 +1076,16 @@ function M.ready()
   return ready
 end
 
+local function drop_node()
+  if node == nil then return end
+  local old = node
+  node = nil
+  ready = false
+  pcall(function()
+    old:dispose()
+  end)
+end
+
 function M.ensure(car_id)
   if car_id == nil or car_id == '' then
     status = 'no car id'
@@ -1090,12 +1100,7 @@ function M.ensure(car_id)
   dispose_brake_lights()
   dispose_running_lights()
   light_data = nil
-  if node ~= nil then
-    pcall(function()
-      node:setPosition(vec3(0, -1000, 0))
-    end)
-  end
-  node = nil
+  drop_node()
   local paths, folder = kn5_candidates(car_id)
   car_folder = folder
   if #paths == 0 then
@@ -1131,9 +1136,7 @@ function M.ensure(car_id)
   end
   if loaded == nil then
     status = 'load failed'
-    pcall(function()
-      node:setPosition(vec3(0, -1000, 0))
-    end)
+    drop_node()
     return false
   end
   pcall(function()
