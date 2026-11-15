@@ -76,10 +76,7 @@ do
   check('playback is halfway', math.abs(mid.pos.x - 5) < 0.001 and math.abs(mid.vel.x - 5) < 0.001)
   local done
   for _ = 1, 5 do done = logic.lead_pose(state, 0.1) end
-  check(
-    'playback returns to start and arms teleport',
-    not state.playing and done.pos.x == 0 and done.vel.x == 0 and state.pulse == 'teleport'
-  )
+  check('playback returns ghost to start', not state.playing and done.pos.x == 0 and done.vel.x == 0 and state.pulse == nil)
 end
 
 do

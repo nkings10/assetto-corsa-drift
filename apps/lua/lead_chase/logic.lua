@@ -279,7 +279,6 @@ function M.lead_pose(state, dt)
   if last.t - state.play_t <= 0.0001 then
     state.playing = false
     state.play_t = 0
-    state.pulse = 'teleport'
     state.notice = 'Lead ready'
     return hold_pose(first), 'hold'
   end
