@@ -484,13 +484,13 @@ function script.windowMain(dt)
   end
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off (teleport only)')
   ui.text('Ghost: ' .. tostring(ghost.status()))
-  ui.text('Ghost car: ' .. tostring(effective_ghost_id() or 'none'))
+  ui.text('Lead car: ' .. tostring(effective_ghost_id() or 'none'))
   if recorded_car_id ~= nil then
     ui.text('Recorded car: ' .. recorded_car_id)
   end
 
   ui.separator()
-  ui.text('Ghost model')
+  ui.text('Lead car')
   if ui.inputText ~= nil then
     local ok, a, b = pcall(ui.inputText, 'Filter', car_search)
     if ok then
@@ -512,7 +512,7 @@ function script.windowMain(dt)
     sync_car_option_index()
   end
   if car_options ~= nil and #car_options > 0 then
-    local preview = car_options[car_option_i] and car_options[car_option_i].label or 'Ghost car'
+    local preview = car_options[car_option_i] and car_options[car_option_i].label or 'Lead car'
     local flags = nil
     if ui.ComboFlags ~= nil and ui.ComboFlags.HeightLarge ~= nil then
       flags = ui.ComboFlags.HeightLarge
@@ -529,9 +529,9 @@ function script.windowMain(dt)
       end
     end
     if flags ~= nil then
-      pcall(ui.combo, 'Ghost car', preview, flags, draw_car_combo)
+      pcall(ui.combo, '##lead_car', preview, flags, draw_car_combo)
     else
-      pcall(ui.combo, 'Ghost car', preview, draw_car_combo)
+      pcall(ui.combo, '##lead_car', preview, draw_car_combo)
     end
   end
 
