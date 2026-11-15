@@ -62,6 +62,8 @@ local head_l, head_r, tail_light = nil, nil, nil
 
 local smoke_main, smoke_heavy, smoke_push = nil, nil, nil
 local smoke_clock = 0
+local smoke_pos = vec3()
+local smoke_vel = vec3()
 
 local sound = nil
 local sound_bank = nil
@@ -615,6 +617,7 @@ end
 
 local function ensure_smoke()
   if smoke_main ~= nil or ac.Particles == nil or ac.Particles.Smoke == nil then return end
+  -- Same emitter params as TandemGhost (white FadeIn tyre smoke).
   local ok1, main = pcall(ac.Particles.Smoke, {
     color = rgbm(1, 1, 1, 0.3),
     colorConsistency = 0.3,
@@ -647,38 +650,115 @@ end
 
 local function update_smoke(pose, look, side, pos, dt)
   ensure_smoke()
-  if smoke_main == nil or pose == nil then return end
+  if smoke_main == nil or pose == nil or pos == nil or look == nil or side == nil then return end
   local drift = math.abs(pose.drift or 0)
   local speed = pose.speed or (speed_ms(pose.vel) * 3.6)
   if smoke_push ~= nil then
     smoke_push.position = pos
     if pose.vel then smoke_push.velocity = v3(pose.vel) end
   end
-  local now = os.preciseClock and os.preciseClock() or smoke_clock + dt
-  -- Tandem fires ~120 Hz with many bursts; keep a lighter stream for Solo Tandems.
-  if drift <= 8 or speed <= 20 or now - smoke_clock < 0.04 then
+  local now = os.preciseClock and os.preciseClock() or (smoke_clock + (dt or 0))
+  -- Match TandemGhost: ~120 Hz, 5° / 12 km/h thresholds, multi-burst around each rear wheel.
+  if drift <= 5 or speed <= 12 or now - smoke_clock < 0.008 then
     return
   end
   smoke_clock = now
-  local intensity = clamp((drift - 8) / 40, 0, 1) * clamp((speed - 20) / 80, 0, 1)
-  local wheel_base, track_half = 1.35, 0.72
+
+  local intensity = clamp((drift - 5) / 35, 0, 1) * clamp((speed - 12) / 68, 0, 1)
+  local wheel_base, track_half, wheel_r = 1.35, 0.72, 0.33
   local vel = v3(pose.vel)
-  local kick = speed * 0.008 * intensity
+  local kick = speed * 0.012 * intensity
+  local kick_x, kick_z = -look.x * kick, -look.z * kick
   local slip_sign = (pose.drift or 0) > 0 and -1 or 1
-  local amount = 0.25 + intensity * 0.9
-  for _, sign in ipairs({ -1, 1 }) do
-    local contact = pos - look * wheel_base + side * (track_half * sign) + vec3(0, 0.02, 0)
-    local v = vec3(
-      vel.x * 0.25 - look.x * kick + side.x * slip_sign * speed * 0.004,
-      0.05 + math.random() * 0.1,
-      vel.z * 0.25 - look.z * kick + side.z * slip_sign * speed * 0.004
-    )
-    pcall(function()
-      smoke_main:emit(contact, v, amount)
-    end)
-    if intensity > 0.55 and smoke_heavy ~= nil then
+  local slip_x = side.x * slip_sign * speed * 0.006
+  local slip_z = side.z * slip_sign * speed * 0.006
+
+  local rl_x = pos.x - look.x * wheel_base + side.x * track_half
+  local rl_y = pos.y - look.y * wheel_base + side.y * track_half + 0.02
+  local rl_z = pos.z - look.z * wheel_base + side.z * track_half
+  local rr_x = pos.x - look.x * wheel_base - side.x * track_half
+  local rr_y = pos.y - look.y * wheel_base - side.y * track_half + 0.02
+  local rr_z = pos.z - look.z * wheel_base - side.z * track_half
+
+  local main_amount = 0.8 + intensity * 3.5
+  for i = 1, 2 do
+    local wx, wy, wz
+    if i == 1 then
+      wx, wy, wz = rl_x, rl_y, rl_z
+    else
+      wx, wy, wz = rr_x, rr_y, rr_z
+    end
+    local wc_x, wc_y, wc_z = wx, wy + wheel_r, wz
+    for burst = 1, 3 do
+      local angle
+      if burst == 1 then
+        angle = -math.pi / 2 + (math.random() - 0.5) * 1.2
+      elseif burst == 2 then
+        angle = math.pi * (0.5 + math.random() * 0.5)
+      else
+        angle = math.random() * math.pi * 2
+      end
+      local r_offset = wheel_r * (0.7 + math.random() * 0.6)
+      local along = math.cos(angle) * r_offset
+      local up = math.sin(angle) * r_offset
+      local lateral = (math.random() - 0.5) * 0.4
+      smoke_pos.x = wc_x - look.x * along + (math.random() - 0.5) * 0.15 + side.x * lateral
+      smoke_pos.y = wc_y + up
+      smoke_pos.z = wc_z - look.z * along + (math.random() - 0.5) * 0.15 + side.z * lateral
+      if smoke_pos.y < wy then smoke_pos.y = wy end
+      local out_x, out_y, out_z = smoke_pos.x - wc_x, smoke_pos.y - wc_y, smoke_pos.z - wc_z
+      local out_len = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z) + 0.001
+      local out_force = 0.5 + intensity * 1.0
+      smoke_vel.x = vel.x * 0.35 + kick_x + slip_x + (out_x / out_len) * out_force + (math.random() - 0.5) * 0.6
+      smoke_vel.y = 0.1 + math.random() * 0.2 + (out_y / out_len) * out_force * 0.3
+      smoke_vel.z = vel.z * 0.35 + kick_z + slip_z + (out_z / out_len) * out_force + (math.random() - 0.5) * 0.6
       pcall(function()
-        smoke_heavy:emit(contact, v * 1.1, (intensity - 0.55) * 1.2)
+        smoke_main:emit(smoke_pos, smoke_vel, main_amount * (0.7 + math.random() * 0.6))
+      end)
+    end
+  end
+
+  if intensity > 0.3 and smoke_heavy ~= nil then
+    local heavy_amount = (intensity - 0.3) * 4.0
+    for i = 1, 2 do
+      local wx, wy, wz
+      if i == 1 then
+        wx, wy, wz = rl_x, rl_y, rl_z
+      else
+        wx, wy, wz = rr_x, rr_y, rr_z
+      end
+      local wc_x, wc_y, wc_z = wx, wy + wheel_r, wz
+      for _ = 1, 2 do
+        local angle = math.random() * math.pi * 2
+        local r_offset = wheel_r * (0.5 + math.random() * 0.8)
+        local along = math.cos(angle) * r_offset
+        local up = math.sin(angle) * r_offset
+        smoke_pos.x = wc_x - look.x * along + side.x * (math.random() - 0.5) * 0.5
+        smoke_pos.y = math.max(wy, wc_y + up)
+        smoke_pos.z = wc_z - look.z * along + side.z * (math.random() - 0.5) * 0.5
+        local out_x, out_y, out_z = smoke_pos.x - wc_x, smoke_pos.y - wc_y, smoke_pos.z - wc_z
+        local out_len = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z) + 0.001
+        local out_force = 0.8 + intensity * 1.5
+        smoke_vel.x = vel.x * 0.45 + kick_x * 1.3 + slip_x * 1.5 + (out_x / out_len) * out_force + (math.random() - 0.5) * 0.8
+        smoke_vel.y = 0.15 + math.random() * 0.25 + (out_y / out_len) * out_force * 0.4
+        smoke_vel.z = vel.z * 0.45 + kick_z * 1.3 + slip_z * 1.5 + (out_z / out_len) * out_force + (math.random() - 0.5) * 0.8
+        pcall(function()
+          smoke_heavy:emit(smoke_pos, smoke_vel, heavy_amount)
+        end)
+      end
+    end
+    if intensity > 0.6 then
+      local c_x = (rl_x + rr_x) * 0.5
+      local c_y = (rl_y + rr_y) * 0.5
+      local c_z = (rl_z + rr_z) * 0.5
+      smoke_pos.x = c_x - look.x * 0.2 + (math.random() - 0.5) * 0.4
+      smoke_pos.y = c_y + math.random() * 0.06
+      smoke_pos.z = c_z - look.z * 0.2 + (math.random() - 0.5) * 0.4
+      smoke_vel.x = vel.x * 0.45 + kick_x * 1.5 + (math.random() - 0.5) * 0.6
+      smoke_vel.y = 0.08 + math.random() * 0.2
+      smoke_vel.z = vel.z * 0.45 + kick_z * 1.5 + (math.random() - 0.5) * 0.6
+      pcall(function()
+        smoke_heavy:emit(smoke_pos, smoke_vel, heavy_amount * 0.8)
       end)
     end
   end
