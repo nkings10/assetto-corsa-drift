@@ -2,6 +2,20 @@
 
 local M = {}
 
+local function sibling(name)
+  local folder = 'apps/lua/solo_tandems/'
+  if ac.getFolder and ac.FolderID and ac.FolderID.ACApps then
+    local apps = ac.getFolder(ac.FolderID.ACApps)
+    if type(apps) == 'string' and apps ~= '' then
+      folder = apps .. '/lua/solo_tandems/'
+    end
+  end
+  return dofile(folder .. name)
+end
+
+local car_lights = sibling('car_lights.lua')
+local light_data = nil
+
 local node = nil
 local all_meshes = nil
 local ready = false
@@ -222,6 +236,20 @@ local function find_parts(root)
   end
 end
 
+local function find_named_meshes(root, names)
+  if root == nil or names == nil or #names == 0 then return nil end
+  local ok, meshes = pcall(function()
+    return root:findMeshes(names)
+  end)
+  if ok and meshes ~= nil and #meshes > 0 then
+    pcall(function()
+      meshes:ensureUniqueMaterials()
+    end)
+    return meshes
+  end
+  return nil
+end
+
 local function find_meshes(root)
   local function grab(patterns)
     for i = 1, #patterns do
@@ -237,20 +265,32 @@ local function find_meshes(root)
     end
     return nil
   end
-  -- Do not use bare ?BRAKE? — that matches BRAKE_DISC rotors, not lights.
-  brake_meshes = grab({
-    '{ actsAsBrakeLights:yes }',
-    '{ ?LIGHT_BRAKE? , ?light_brake? , ?BRAKE_LIGHT? , ?brake_light? }',
-    '{ ?STOPLIGHT? , ?stop_light? , ?STOP_LIGHT? }',
-  })
-  head_meshes = grab({
-    '{ ?HEADLIGHT? , ?headlight? , ?HEAD_LIGHT? }',
-    '{ ?FRONT_LIGHT? , ?front_light? }',
-  })
-  tail_meshes = grab({
-    '{ ?TAILLIGHT? , ?taillight? , ?TAIL_LIGHT? }',
-    '{ ?REAR_LIGHT? , ?rear_light? }',
-  })
+
+  light_data = car_lights.load(car_folder)
+  brake_meshes = find_named_meshes(root, light_data.brakelights)
+  head_meshes = find_named_meshes(root, light_data.headlights)
+  tail_meshes = find_named_meshes(root, light_data.taillights)
+
+  if head_meshes == nil then
+    head_meshes = grab({
+      '{ ?HEADLIGHT? , ?headlight? , ?HEAD_LIGHT? }',
+      '{ ?FRONT_LIGHT? , ?front_light? }',
+    })
+  end
+  if tail_meshes == nil then
+    tail_meshes = grab({
+      '{ ?TAILLIGHT? , ?taillight? , ?TAIL_LIGHT? }',
+      '{ ?REAR_LIGHT? , ?rear_light? }',
+    })
+  end
+  if brake_meshes == nil then
+    brake_meshes = grab({
+      '{ actsAsBrakeLights:yes }',
+      '{ ?LIGHT_BRAKE? , ?light_brake? , ?BRAKE_LIGHT? , ?brake_light? }',
+      '{ ?STOPLIGHT? , ?stop_light? , ?STOP_LIGHT? }',
+    })
+  end
+
   local ok_all, meshes = pcall(function()
     return root:findMeshes('?')
   end)
@@ -278,22 +318,15 @@ local function find_meshes(root)
         end
       end
     end
-    if #names > 0 then
-      local ok_brk, found = pcall(function()
-        return root:findMeshes(names)
-      end)
-      if ok_brk and found ~= nil and #found > 0 then
-        pcall(function()
-          found:ensureUniqueMaterials()
-        end)
-        brake_meshes = found
-      end
-    end
+    brake_meshes = find_named_meshes(root, names)
   end
   if brake_meshes == nil then
     brake_meshes = tail_meshes
   end
   tyre_meshes = grab({ '{ ?TYRE? , ?tyre? , ?TIRE? , ?tire? }' })
+
+  local brk_entry = light_data.brake_entries[1]
+  glow_brake.values.gGlowColor = car_lights.glow_color(brk_entry, 0.8)
   glow_brake.meshes = brake_meshes
   glow_head.meshes = head_meshes
   glow_tail.meshes = tail_meshes
@@ -381,33 +414,98 @@ local function update_wipers(dt)
   end
 end
 
-local function make_light(color, range, spot)
-  if ac.LightSource == nil then return nil end
-  local ok, light = pcall(ac.LightSource, ac.LightType.Regular)
-  if not ok or light == nil then return nil end
-  light.color = color
-  light.range = range
-  light.spot = spot
-  light.spotSharpness = 0.4
-  light.shadows = false
-  light.position = vec3(0, -1000, 0)
-  return light
-end
-
-local function ensure_lights()
-  if brake_l == nil then
-    brake_l = make_light(rgb(40, 0, 0), 5, 90)
-    brake_r = make_light(rgb(40, 0, 0), 5, 90)
-  end
-  if head_l == nil then
-    head_l = make_light(rgb(8, 8, 7), 60, 55)
-    head_r = make_light(rgb(8, 8, 7), 60, 55)
-    tail_light = make_light(rgb(4, 0, 0), 18, 110)
-  end
-end
-
 local function hide_light(light)
   if light ~= nil then light.position = vec3(0, -1000, 0) end
+end
+
+local function dispose_light(light)
+  if light == nil then return end
+  pcall(function()
+    if light.dispose then light:dispose() end
+  end)
+end
+
+local function dispose_brake_lights()
+  dispose_light(brake_l)
+  dispose_light(brake_r)
+  brake_l, brake_r = nil, nil
+end
+
+local function apply_light_params(light, entry, defs)
+  if light == nil then return end
+  light.color = car_lights.entry_light_color(entry, defs.color_scale)
+  light.specularMultiplier = (entry and entry.specular_mult) or defs.specular
+  light.range = (entry and entry.range) or defs.range
+  light.rangeGradientOffset = defs.range_grad or 0.2
+  light.fadeAt = (entry and entry.fade_at) or defs.fade_at
+  light.fadeSmooth = (entry and entry.fade_smooth) or defs.fade_smooth
+  light.spot = (entry and entry.spot) or defs.spot
+  light.spotSharpness = (entry and entry.spot_sharpness) or defs.spot_sharp
+  light.shadows = false
+  light.position = vec3(0, -1000, 0)
+  light.direction = vec3(0, -0.1, -1)
+end
+
+local function ensure_brake_lights()
+  if brake_l ~= nil then return end
+  if ac.LightSource == nil then return end
+  local entries = (light_data and light_data.brake_entries) or {}
+  local e1 = entries[1]
+  local e2 = entries[2] or entries[1]
+  local defs = {
+    color_scale = 40,
+    specular = 0.8,
+    range = 15,
+    fade_at = 200,
+    fade_smooth = 80,
+    spot = 130,
+    spot_sharp = 0.2,
+  }
+  local ok_l, left = pcall(ac.LightSource, ac.LightType.Regular)
+  local ok_r, right = pcall(ac.LightSource, ac.LightType.Regular)
+  if ok_l and left ~= nil then
+    apply_light_params(left, e1, defs)
+    brake_l = left
+  end
+  if ok_r and right ~= nil then
+    apply_light_params(right, e2, defs)
+    brake_r = right
+  end
+end
+
+local function ensure_running_light_sources()
+  if head_l ~= nil then return end
+  if ac.LightSource == nil then return end
+  local ok1, a = pcall(ac.LightSource, ac.LightType.Regular)
+  local ok2, b = pcall(ac.LightSource, ac.LightType.Regular)
+  local ok3, c = pcall(ac.LightSource, ac.LightType.Regular)
+  if ok1 and a then
+    a.color = rgb(8, 8, 7)
+    a.range = 60
+    a.spot = 55
+    a.spotSharpness = 0.4
+    a.shadows = false
+    a.position = vec3(0, -1000, 0)
+    head_l = a
+  end
+  if ok2 and b then
+    b.color = rgb(8, 8, 7)
+    b.range = 60
+    b.spot = 55
+    b.spotSharpness = 0.4
+    b.shadows = false
+    b.position = vec3(0, -1000, 0)
+    head_r = b
+  end
+  if ok3 and c then
+    c.color = rgb(4, 0, 0)
+    c.range = 18
+    c.spot = 110
+    c.spotSharpness = 0.3
+    c.shadows = false
+    c.position = vec3(0, -1000, 0)
+    tail_light = c
+  end
 end
 
 local function set_emissive(meshes, on, intensity, ambient)
@@ -430,7 +528,7 @@ end
 local function set_running_lights(on)
   if on == lights_on then return end
   lights_on = on
-  ensure_lights()
+  ensure_running_light_sources()
   set_emissive(head_meshes, on, 100, 30)
   set_emissive(tail_meshes, on, 60, 15)
   if not on then
@@ -440,15 +538,34 @@ local function set_running_lights(on)
   end
 end
 
+local function valid_local_pos(p)
+  return p ~= nil and type(p.x) == 'number' and not (p.x == 0 and p.y == 0 and p.z == 0)
+end
+
+local function local_to_world(pos, look, up, side, local_pos)
+  return pos + side * local_pos.x + up * local_pos.y + look * local_pos.z
+end
+
+local function local_dir_to_world(look, up, side, local_dir)
+  if local_dir == nil then return (-look - up * 0.05):normalize() end
+  return (side * local_dir.x + up * local_dir.y + look * local_dir.z):normalize()
+end
+
 local function set_brake_visual(on, look, up, side, pos)
-  ensure_lights()
+  ensure_brake_lights()
+  local entry = light_data and light_data.brake_entries[1] or nil
   if on ~= brake_on then
     brake_on = on
-    -- Prefer dedicated brake meshes; fall back to taillight meshes only while braking.
     local meshes = brake_meshes or tail_meshes
-    set_emissive(meshes, on, 90, 22)
-    if not on and brake_meshes ~= nil and tail_meshes ~= nil and brake_meshes ~= tail_meshes then
-      set_emissive(tail_meshes, false, 0, 0)
+    if on then
+      local intensity = car_lights.brake_emissive(entry)
+      set_emissive(meshes, true, intensity, intensity * 0.25)
+      glow_brake.values.gGlowColor = car_lights.glow_color(entry, 0.8)
+    else
+      set_emissive(meshes, false, 0, 0)
+      if brake_meshes ~= nil and tail_meshes ~= nil and brake_meshes ~= tail_meshes then
+        set_emissive(tail_meshes, false, 0, 0)
+      end
     end
   end
   if not on then
@@ -456,16 +573,43 @@ local function set_brake_visual(on, look, up, side, pos)
     hide_light(brake_r)
     return
   end
-  if look == nil or pos == nil then return end
-  local rear = pos - look * 2.0 + up * 0.5
-  local dir = (-look - up * 0.1):normalize()
-  if brake_l then
-    brake_l.position = rear + side * 0.55
-    brake_l.direction = dir
-  end
-  if brake_r then
-    brake_r.position = rear - side * 0.55
-    brake_r.direction = dir
+  if look == nil or pos == nil or side == nil or up == nil then return end
+
+  local entries = (light_data and light_data.brake_entries) or {}
+  local e1, e2 = entries[1], entries[2]
+  if e1 ~= nil and valid_local_pos(e1.position) and e2 ~= nil and valid_local_pos(e2.position) then
+    if brake_l then
+      brake_l.position = local_to_world(pos, look, up, side, e1.position)
+      brake_l.direction = local_dir_to_world(look, up, side, e1.direction)
+    end
+    if brake_r then
+      brake_r.position = local_to_world(pos, look, up, side, e2.position)
+      brake_r.direction = local_dir_to_world(look, up, side, e2.direction)
+    end
+  elseif e1 ~= nil and valid_local_pos(e1.position) then
+    local lp = e1.position
+    local dir = local_dir_to_world(look, up, side, e1.direction)
+    if brake_l then
+      brake_l.position = local_to_world(pos, look, up, side, lp)
+      brake_l.direction = dir
+    end
+    if brake_r then
+      brake_r.position = local_to_world(pos, look, up, side, { x = -lp.x, y = lp.y, z = lp.z })
+      brake_r.direction = dir
+    end
+  else
+    local size = vec3(1.8, 1.3, 4.5)
+    local rear = pos - look * (size.z * 0.48) + up * (size.y * 0.42)
+    local dir = (-look - up * 0.05):normalize()
+    local side_off = size.x * 0.35
+    if brake_l then
+      brake_l.position = rear + side * side_off
+      brake_l.direction = dir
+    end
+    if brake_r then
+      brake_r.position = rear - side * side_off
+      brake_r.direction = dir
+    end
   end
 end
 
@@ -745,6 +889,8 @@ function M.ensure(car_id)
   ready = false
   loaded_id = car_id
   stop_sound()
+  dispose_brake_lights()
+  light_data = nil
   if node ~= nil then
     pcall(function()
       node:setPosition(vec3(0, -1000, 0))
