@@ -14,6 +14,7 @@ local function sibling(name)
 end
 
 local car_lights = sibling('car_lights.lua')
+local wetness = sibling('wetness.lua')
 local light_data = nil
 
 local node = nil
@@ -56,6 +57,7 @@ local brake_on = false
 local lights_on = false
 local wet_applied = false
 local last_wet = -1
+local wet_saved = nil
 
 local brake_l, brake_r = nil, nil
 local head_l, head_r, tail_light = nil, nil, nil
@@ -252,7 +254,14 @@ local function find_named_meshes(root, names)
   return nil
 end
 
+local function clear_wet_state()
+  wet_saved = nil
+  wet_applied = false
+  last_wet = -1
+end
+
 local function find_meshes(root)
+  clear_wet_state()
   local function grab(patterns)
     for i = 1, #patterns do
       local ok, meshes = pcall(function()
@@ -969,6 +978,21 @@ local function snap_y(recorded_y, world_xz, dt, speed_kmh)
   return last_y
 end
 
+local function read_material(meshes, index, name)
+  if meshes == nil or meshes.getMaterialPropertyValue == nil then return nil end
+  local ok, value = pcall(meshes.getMaterialPropertyValue, meshes, index, name)
+  if ok and type(value) == 'number' then return value end
+  return nil
+end
+
+local function write_material(meshes, index, name, value)
+  if meshes == nil or meshes.at == nil then return end
+  local one = meshes:at(index)
+  if one ~= nil and one.setMaterialProperty ~= nil then
+    one:setMaterialProperty(name, value)
+  end
+end
+
 local function update_wetness()
   if all_meshes == nil or ac.getSim == nil then return end
   local ok, sim = pcall(ac.getSim)
@@ -976,6 +1000,9 @@ local function update_wetness()
   local wet = sim.rainWetness or 0
   local q = math.floor(wet * 100 + 0.5) / 100
   if q > 0.01 then
+    if wet_saved == nil and exterior_meshes ~= nil then
+      wet_saved = wetness.capture(exterior_meshes, tyre_meshes, read_material)
+    end
     if q ~= last_wet then
       last_wet = q
       wet_applied = true
@@ -993,7 +1020,14 @@ local function update_wetness()
     wet_applied = false
     last_wet = -1
     pcall(function()
-      if exterior_meshes then
+      local writes = wetness.restore_writes(wet_saved)
+      if #writes > 0 then
+        for i = 1, #writes do
+          local item = writes[i]
+          local meshes = item.group == 'tyre' and tyre_meshes or exterior_meshes
+          pcall(write_material, meshes, item.index, item.prop, item.value)
+        end
+      elseif exterior_meshes then
         exterior_meshes:setMaterialProperty('ksSpecularEXP', 50)
         exterior_meshes:setMaterialProperty('fresnelC', 0.04)
       end
