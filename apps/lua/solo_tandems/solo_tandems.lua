@@ -16,8 +16,8 @@ local logic = dofile(app_file('logic.lua'))
 local lead_visual = dofile(app_file('lead_visual.lua'))
 
 local state = logic.create()
-local deck_seq = 0
 local deck = nil
+local deck_link = { seen = false, seq = 0 }
 local recorded_car_id = nil
 local lead_override = nil
 local all_cars = nil
@@ -477,8 +477,8 @@ end
 
 local function deck_action()
   ensure_deck()
-  if deck == nil or deck.seq == deck_seq then return end
-  deck_seq = deck.seq
+  if deck == nil then return end
+  if not logic.sync_deck(deck_link, deck.seq) then return end
   local action = ACTIONS[deck.action]
   if action ~= nil then press(action) end
 end

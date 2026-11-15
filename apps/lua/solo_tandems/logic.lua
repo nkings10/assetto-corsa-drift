@@ -528,4 +528,17 @@ function M.apply_pack(state, payload, opts)
   }
 end
 
+function M.sync_deck(link, remote_seq)
+  if link.seen ~= true then
+    link.seen = true
+    link.seq = remote_seq
+    return false
+  end
+  if remote_seq == link.seq then
+    return false
+  end
+  link.seq = remote_seq
+  return true
+end
+
 return M

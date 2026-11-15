@@ -164,6 +164,16 @@ do
   )
 end
 
+do
+  local link = { seen = false, seq = 0 }
+  check('opening ignores the last deck press', logic.sync_deck(link, 5) == false and link.seq == 5)
+  check('same deck count does not press again', logic.sync_deck(link, 5) == false)
+  check('a new deck press is taken', logic.sync_deck(link, 6) == true and link.seq == 6)
+  local fresh = { seen = false, seq = 0 }
+  check('opening at zero waits', logic.sync_deck(fresh, 0) == false)
+  check('first press after open is taken', logic.sync_deck(fresh, 1) == true)
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
