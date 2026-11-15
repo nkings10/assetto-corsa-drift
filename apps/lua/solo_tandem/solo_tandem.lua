@@ -570,5 +570,4 @@ function script.windowMain(dt)
     ui.text('No .lead files yet')
   end
   if ui.button('Import .lead') then import_run() end
-  ui.text('Friend needs the same car. Same track helps.')
 end
