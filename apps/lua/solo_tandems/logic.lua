@@ -236,7 +236,7 @@ function M.capture(state, dt, pose)
   if dt < 0 then dt = 0 end
   if state.elapsed + dt > MAX_SECONDS then
     state.recording = false
-    state.notice = 'Lead run saved'
+    state.notice = '15 minute recording limit reached'
     return
   end
   state.elapsed = state.elapsed + dt

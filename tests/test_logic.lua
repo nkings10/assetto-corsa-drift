@@ -164,6 +164,21 @@ do
   )
 end
 
+do
+  local state = logic.create()
+  logic.handle(state, logic.RECORD, two)
+  logic.capture(state, 14 * 60, pose(1, 0, 1))
+  check('under 15 minutes keeps recording', state.recording and #state.samples == 1)
+  logic.capture(state, 61, pose(2, 0, 1))
+  check('15 minute limit stops the recording', not state.recording and #state.samples == 1)
+  check('15 minute limit tells the user', state.notice == '15 minute recording limit reached')
+  local stopped = logic.create()
+  logic.handle(stopped, logic.RECORD, two)
+  logic.capture(stopped, 0.1, pose(1, 0, 1))
+  logic.handle(stopped, logic.RECORD, two)
+  check('stopping yourself still says saved', stopped.notice == 'Lead run saved')
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
