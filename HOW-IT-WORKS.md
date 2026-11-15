@@ -6,7 +6,7 @@ The mode starts you in the pits, the same way Practice does, so you can open the
 
 ## A session
 
-Record while you drive. Every frame is stored: where the car is, which way it faces, how fast it is moving, steering, brake, throttle, rpm, gear, drift angle, and the speed of each wheel. Press Record again to stop. A recording stops itself at 15 minutes. The notice then says Lead run saved.
+Record while you drive. The run is stored 30 times a second: where the car is, which way it faces, how fast it is moving, steering, brake, throttle, rpm, gear, drift angle, and the speed of each wheel. Playback blends between those points. Press Record again to stop, and the notice says Lead run saved. A recording stops itself at 15 minutes. From 14 minutes the notice counts down the seconds left, and at the limit it says 15 minute recording limit reached.
 
 Spawn puts the lead at the first point of that run and holds it there. The wheels are still. The steering stays where it was at the start.
 
@@ -26,15 +26,15 @@ Spawn, Start, and Teleport do nothing while a recording is still going. Stop the
 
 The model is the car you recorded, unless you pick another. The app lists the cars installed in the game, and the list can be filtered. Picking a different car while the lead is showing loads that model.
 
-The model follows the saved line. Its wheels steer and spin with the recording. The brake lights follow the brake. The headlights are on while it is showing. Tyre smoke appears when the saved run is sliding and moving. The wipers sweep while it is showing. In the rain the paint is made to look wet. The lead plays that car's engine sound from the saved rpm and throttle.
+The model follows the saved line. Its wheels steer and spin with the recording. The brake lights follow the brake. The headlights are on while it is showing. Tyre smoke comes from the rear wheels when the saved run is sliding and moving. The wipers move only while rain is falling. In the rain the paint is made to look wet, and it goes back to that car's own paint when the track dries. The lead plays that car's engine sound from the saved rpm and throttle.
 
-The point saved while you drive sits in the body of the car, about a metre above the road. The app looks down from that point, finds the road, and sits the model on it.
+The point saved while you drive sits in the body of the car, about a metre above the road. The first time that point is on the road, the app measures the gap down to the tyres and keeps it. Later points, including a jump, use that same gap.
 
 ## Sharing a run
 
 Export writes a `.lead` file. The file holds the run, the car, and the track. The folder is `Documents/Solo Tandems`, unless you set another folder in the app window.
 
-Import reads a `.lead` file from that folder. A run recorded on another track is refused, and the notice names the track it needs. A file that is not a Solo Tandems run is refused.
+Import reads a `.lead` file from that folder. A run recorded on another track is refused, and the notice names the track it needs. A file that is not a Solo Tandems run, or a broken file, is refused with Bad file. The lead already loaded stays in place.
 
 ## Controls
 
