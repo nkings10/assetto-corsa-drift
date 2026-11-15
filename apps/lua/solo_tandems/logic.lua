@@ -497,7 +497,7 @@ function M.apply_pack(state, payload, opts)
   if state == nil or type(payload) ~= 'table' then
     return nil, 'Bad data'
   end
-  if payload.kind ~= nil and payload.kind ~= 'solo_tandems' and payload.kind ~= 'lead_chase' then
+  if payload.kind ~= nil and payload.kind ~= 'solo_tandems' then
     return nil, 'Not a Solo Tandems file'
   end
   local file_track = tostring(payload.trackId or '')
