@@ -153,9 +153,15 @@ do
   local decoded = logic.decode(text)
   check('decode roundtrip', decoded ~= nil and decoded.sampleCount == 2)
   local other = logic.create()
-  local meta = logic.apply_pack(other, decoded)
+  local meta = logic.apply_pack(other, decoded, { trackId = 'test_track' })
   check('import restores lead', meta.carId == 'test_car' and #other.samples == 2 and other.samples[2].pos.x == 5)
   check('import hides lead until Appear', not other.placed and not other.recording)
+  local blocked = logic.create()
+  local ok, err = logic.apply_pack(blocked, decoded, { trackId = 'other_track' })
+  check(
+    'import rejects wrong track',
+    ok == nil and #blocked.samples == 0 and type(err) == 'string' and err:find('Needs track: test_track', 1, true)
+  )
 end
 
 if failures > 0 then

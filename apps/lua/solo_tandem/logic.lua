@@ -492,12 +492,18 @@ function M.decode(text)
   return data
 end
 
-function M.apply_pack(state, payload)
+function M.apply_pack(state, payload, opts)
+  opts = opts or {}
   if state == nil or type(payload) ~= 'table' then
     return nil, 'Bad data'
   end
   if payload.kind ~= nil and payload.kind ~= 'lead_chase' then
     return nil, 'Not a lead chase file'
+  end
+  local file_track = tostring(payload.trackId or '')
+  local current_track = tostring(opts.trackId or '')
+  if file_track ~= '' and current_track ~= '' and file_track ~= current_track then
+    return nil, 'Not loading. Needs track: ' .. file_track
   end
   local samples_in = payload.samples
   if type(samples_in) ~= 'table' or #samples_in == 0 then
@@ -518,7 +524,7 @@ function M.apply_pack(state, payload)
   state.notice = 'Lead imported'
   return {
     carId = payload.carId or '',
-    trackId = payload.trackId or '',
+    trackId = file_track,
   }
 end
 
