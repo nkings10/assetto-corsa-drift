@@ -10,6 +10,7 @@ M.START = 'start'
 M.CLEAR = 'clear'
 
 local MAX_SECONDS = 15 * 60
+local SAMPLE_INTERVAL = 1 / 30
 
 local function copy3(v)
   return { x = v.x, y = v.y, z = v.z }
@@ -116,6 +117,7 @@ function M.create()
     placed = false,
     playing = false,
     play_t = 0,
+    play_i = 1,
     chase_start = nil,
     pulse = nil,
     notice = 'Ready',
@@ -129,6 +131,7 @@ end
 local function stop_playback(state)
   state.playing = false
   state.play_t = 0
+  state.play_i = 1
 end
 
 local function hide_lead_car(state)
@@ -154,6 +157,7 @@ function M.handle(state, action, ctx)
     state.recording = true
     state.samples = {}
     state.elapsed = 0
+    state.sample_slot = nil
     hide_lead_car(state)
     state.notice = 'Recording'
     return state
@@ -202,6 +206,7 @@ function M.handle(state, action, ctx)
     end
     state.playing = true
     state.play_t = 0
+    state.play_i = 1
     state.notice = 'Lead is running'
     return state
   end
@@ -240,6 +245,11 @@ function M.capture(state, dt, pose)
     return
   end
   state.elapsed = state.elapsed + dt
+  local slot = math.floor(state.elapsed / SAMPLE_INTERVAL + 1e-9)
+  if state.sample_slot ~= nil and slot <= state.sample_slot then
+    return
+  end
+  state.sample_slot = slot
   local sample = pose_copy(pose)
   sample.t = state.elapsed
   state.samples[#state.samples + 1] = sample
@@ -279,19 +289,19 @@ function M.lead_position(state, dt)
   if last.t - state.play_t <= 0.0001 then
     state.playing = false
     state.play_t = 0
+    state.play_i = 1
     state.notice = 'Lead ready'
     return hold_pose(first), 'hold'
   end
   local t = state.play_t
-  local b = samples[1]
-  local a = samples[1]
-  for i = 2, #samples do
-    if t <= samples[i].t then
-      a = samples[i - 1]
-      b = samples[i]
-      break
-    end
+  local i = state.play_i or 1
+  if i < 1 or i > #samples or samples[i].t > t then i = 1 end
+  while i < #samples and samples[i + 1].t < t do
+    i = i + 1
   end
+  state.play_i = i
+  local a = samples[i]
+  local b = samples[i + 1] or a
   local span = b.t - a.t
   local u = span > 0 and (t - a.t) / span or 0
   local dir = normalize(lerp3(a.dir, b.dir, u))
