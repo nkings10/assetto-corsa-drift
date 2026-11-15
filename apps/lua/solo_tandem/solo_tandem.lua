@@ -492,7 +492,7 @@ function script.windowMain(dt)
   ui.separator()
   ui.text('Ghost model')
   if ui.inputText ~= nil then
-    local ok, a, b = pcall(ui.inputText, 'Search cars', car_search)
+    local ok, a, b = pcall(ui.inputText, 'Filter', car_search)
     if ok then
       local next_search = car_search
       if type(a) == 'string' then
