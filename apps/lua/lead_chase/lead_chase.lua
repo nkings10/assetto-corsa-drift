@@ -19,6 +19,7 @@ local deck_seq = 0
 local deck = nil
 local visual = nil
 local visual_worker = false
+local visual_status = 'off'
 
 local ACTIONS = {
   [1] = logic.RECORD,
@@ -128,10 +129,15 @@ end
 local function move_car(index, pose, speed)
   if physics == nil or pose == nil then return false end
   local vel = speed or pose.vel
-  -- setCarPosition's dir is opposite car.look; pass the negated forward vector.
+  -- Placement dir is opposite car.look; pass the negated forward vector.
   local dir = vec3_of(pose.dir)
   call(physics.setCarVelocity, index, vec3_of(vel))
-  local ok = call(physics.setCarPosition, index, vec3_of(pose.pos), -dir)
+  local ok
+  if index > 0 and physics.setAICarPosition ~= nil then
+    ok = call(physics.setAICarPosition, index, vec3_of(pose.pos), -dir)
+  else
+    ok = call(physics.setCarPosition, index, vec3_of(pose.pos), -dir)
+  end
   call(physics.setCarVelocity, index, vec3_of(vel))
   return ok
 end
@@ -166,11 +172,27 @@ local function ensure_visual()
 end
 
 local function start_visual_worker()
-  if visual_worker or physics == nil or physics.startPhysicsWorker == nil then return end
+  if visual_worker or physics == nil or physics.startPhysicsWorker == nil then
+    if physics == nil or physics.startPhysicsWorker == nil then
+      visual_status = 'no worker api'
+    end
+    return
+  end
   ensure_visual()
-  if visual == nil then return end
-  local ok = pcall(physics.startPhysicsWorker, 'lead_visual', 0, function() end)
-  if ok then visual_worker = true end
+  if visual == nil then
+    visual_status = 'no shared state'
+    return
+  end
+  local ok, err = pcall(physics.startPhysicsWorker, 'lead_visual', 0, function(e)
+    visual_status = e and ('err ' .. tostring(e)) or 'stopped'
+    visual_worker = false
+  end)
+  if ok then
+    visual_worker = true
+    visual_status = 'on'
+  else
+    visual_status = 'fail ' .. tostring(err)
+  end
 end
 
 local function publish_visual(active, steer, wheels)
@@ -186,31 +208,62 @@ local function publish_visual(active, steer, wheels)
   visual.w3 = w[4] or 0
 end
 
-local function apply_brake(index, brake)
-  local brake_v = brake or 0
-  if brake_v < 0.05 then brake_v = 0 end
+local function apply_wheel_spin(index, values)
+  if physics == nil then return end
+  local all = 60
+  local avg = ((values[1] or 0) + (values[2] or 0) + (values[3] or 0) + (values[4] or 0)) * 0.25
+  if physics.setWheelAngularVelocity ~= nil then
+    for i = 0, 3 do
+      call(physics.setWheelAngularVelocity, index, i, values[i + 1] or 0)
+    end
+    call(physics.setWheelAngularVelocity, index, all, avg)
+  end
+  if physics.addWheelTorque ~= nil then
+    for i = 0, 3 do
+      call(physics.addWheelTorque, index, i, (values[i + 1] or 0) * 0.08)
+    end
+  end
+end
+
+local function set_brake_lights(on)
+  if ac.setTargetCar == nil or ac.setBrakingLightsThreshold == nil then return end
+  call(ac.setTargetCar, 1)
+  -- Default threshold is ~0.01; AI often holds brake, which keeps lights on.
+  call(ac.setBrakingLightsThreshold, on and 0.01 or 10)
+  call(ac.setTargetCar, 0)
+end
+
+local function apply_brake_pedal(index, brake)
   if ac.overrideCarControls == nil then return end
   local ok, controls = pcall(ac.overrideCarControls, index)
   if not ok or controls == nil then return end
-  -- CSP 0.3+: replace pedals instead of max(original, value) so lights can turn off.
   if controls.combineAxis ~= nil then controls.combineAxis = false end
-  controls.brake = brake_v
+  controls.brake = brake
   controls.handbrake = 0
   controls.gas = 0
   controls.clutch = 1
-  -- Steering is applied by the physics worker; leave the control channel alone.
   controls.steer = math.huge
+end
+
+local function apply_steer(steer)
+  if physics ~= nil and physics.overrideSteering ~= nil then
+    call(physics.overrideSteering, 1, steer or 0)
+  end
 end
 
 local function park_lead()
   if physics == nil then return end
   call(physics.disableCarCollisions, 1, true, false)
   call(physics.setAILevel, 1, 0)
-  call(physics.setAINoInput, 1, true, false)
+  call(physics.setAINoInput, 1, true, true)
   call(physics.setCarVelocity, 1, vec3(0, 0, 0))
-  call(physics.setCarPosition, 1, vec3(0, -500, 0), vec3(0, 0, 1))
+  if physics.setAICarPosition ~= nil then
+    call(physics.setAICarPosition, 1, vec3(0, -500, 0), vec3(0, 0, 1))
+  else
+    call(physics.setCarPosition, 1, vec3(0, -500, 0), vec3(0, 0, 1))
+  end
   publish_visual(false, 0, { 0, 0, 0, 0 })
-  apply_brake(1, 0)
+  set_brake_lights(false)
   if physics.overrideSteering ~= nil then
     local nan = math.nan
     if nan == nil then nan = 0 / 0 end
@@ -224,8 +277,16 @@ local function show_lead(pose)
   call(physics.setAILevel, 1, 0)
   call(physics.setAINoInput, 1, true, false)
   move_car(1, pose, pose.vel)
-  publish_visual(true, pose.steer, wheel_values(pose.wheels, pose.vel))
-  apply_brake(1, pose.brake)
+  local wheels = wheel_values(pose.wheels, pose.vel)
+  apply_wheel_spin(1, wheels)
+  apply_steer(pose.steer)
+  publish_visual(true, pose.steer, wheels)
+  local braking = (pose.brake or 0) > 0.05
+  set_brake_lights(braking)
+  -- Only push the pedal when lights should be on. Leaving override off lets threshold hide AI brake.
+  if braking then
+    apply_brake_pedal(1, pose.brake)
+  end
 end
 
 local function teleport_player()
@@ -318,6 +379,23 @@ function script.windowMain(dt)
   ui.text(state.spot and 'Chase spot saved' or 'No chase spot')
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off')
   ui.text('Cars: ' .. tostring(car_count()))
+  ui.text('Visual worker: ' .. visual_status)
+  if ac.getCar ~= nil then
+    local ok, lead = pcall(ac.getCar, 1)
+    if ok and lead ~= nil then
+      local omega = 0
+      if lead.wheels ~= nil and lead.wheels[2] ~= nil then
+        omega = lead.wheels[2].angularSpeed or 0
+      end
+      ui.text(string.format(
+        'Lead brake %.2f  lights %s  RL omega %.1f  steer %.2f',
+        lead.brake or -1,
+        tostring(lead.brakeLightsActive),
+        omega,
+        lead.steer and lead.steerLock and (lead.steer / lead.steerLock) or 0
+      ))
+    end
+  end
   ui.text('Stream Deck actions: lead.record, lead.appear, lead.spot, lead.teleport, lead.start, lead.clear')
   ui.text('CSP controls: Lead chase/Record, Appear, Chase spot, Teleport, Start, Clear lead')
 end

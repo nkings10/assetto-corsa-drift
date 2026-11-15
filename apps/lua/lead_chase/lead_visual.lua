@@ -1,5 +1,5 @@
 -- Physics-rate apply for lead wheel spin and steering.
--- setCarPosition runs at render rate and clears these; this restores them ~333 Hz.
+-- Runs after render-rate placement so spin/steer are not left cleared.
 
 local data = ac.connect({
   ac.StructItem.key('leadChase.visual.v1'),
@@ -12,17 +12,26 @@ local data = ac.connect({
 })
 
 local LEAD = 1
+local ALL = 60
 
 function script.update(dt)
   if data.active ~= 1 or physics == nil then return end
   if physics.overrideSteering ~= nil then
     pcall(physics.overrideSteering, LEAD, data.steer)
   end
+  local w0, w1, w2, w3 = data.w0, data.w1, data.w2, data.w3
+  local avg = (w0 + w1 + w2 + w3) * 0.25
   if physics.setWheelAngularVelocity ~= nil then
-    -- 0..3 are wheel indices (masks like Rear=48 also work).
-    pcall(physics.setWheelAngularVelocity, LEAD, 0, data.w0)
-    pcall(physics.setWheelAngularVelocity, LEAD, 1, data.w1)
-    pcall(physics.setWheelAngularVelocity, LEAD, 2, data.w2)
-    pcall(physics.setWheelAngularVelocity, LEAD, 3, data.w3)
+    pcall(physics.setWheelAngularVelocity, LEAD, 0, w0)
+    pcall(physics.setWheelAngularVelocity, LEAD, 1, w1)
+    pcall(physics.setWheelAngularVelocity, LEAD, 2, w2)
+    pcall(physics.setWheelAngularVelocity, LEAD, 3, w3)
+    pcall(physics.setWheelAngularVelocity, LEAD, ALL, avg)
+  end
+  if physics.addWheelTorque ~= nil then
+    pcall(physics.addWheelTorque, LEAD, 0, w0 * 0.08)
+    pcall(physics.addWheelTorque, LEAD, 1, w1 * 0.08)
+    pcall(physics.addWheelTorque, LEAD, 2, w2 * 0.08)
+    pcall(physics.addWheelTorque, LEAD, 3, w3 * 0.08)
   end
 end
