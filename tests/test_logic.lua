@@ -140,6 +140,24 @@ do
   check('playback blends steer', math.abs(mid.steer - 0) < 0.001)
 end
 
+do
+  local state = logic.create()
+  logic.handle(state, logic.RECORD, two)
+  logic.capture(state, 0.1, pose(1, 2, 3, 0.2, { 1, 2, 3, 4 }, -0.25))
+  logic.capture(state, 0.2, pose(5, 6, 7, 0.8, { 4, 5, 6, 7 }, 0.5))
+  logic.handle(state, logic.RECORD, two)
+  local packed = logic.pack(state, { carId = 'test_car', trackId = 'test_track' })
+  check('pack has samples', packed ~= nil and packed.sampleCount == 2 and packed.carId == 'test_car')
+  local text = logic.encode(packed)
+  check('encode makes text', type(text) == 'string' and #text > 20)
+  local decoded = logic.decode(text)
+  check('decode roundtrip', decoded ~= nil and decoded.sampleCount == 2)
+  local other = logic.create()
+  local meta = logic.apply_pack(other, decoded)
+  check('import restores lead', meta.carId == 'test_car' and #other.samples == 2 and other.samples[2].pos.x == 5)
+  check('import hides lead until Appear', not other.placed and not other.recording)
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)

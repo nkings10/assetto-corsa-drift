@@ -317,4 +317,209 @@ function M.lead_pose(state, dt)
   }, 'play'
 end
 
+local function escape_str(s)
+  s = tostring(s or '')
+  s = s:gsub('\\', '\\\\')
+  s = s:gsub('"', '\\"')
+  s = s:gsub('\n', '\\n')
+  s = s:gsub('\r', '\\r')
+  return '"' .. s .. '"'
+end
+
+local function encode_json(value)
+  local t = type(value)
+  if t == 'nil' then
+    return 'null'
+  end
+  if t == 'boolean' then
+    return value and 'true' or 'false'
+  end
+  if t == 'number' then
+    if value ~= value or value == math.huge or value == -math.huge then
+      return '0'
+    end
+    return string.format('%.6g', value)
+  end
+  if t == 'string' then
+    return escape_str(value)
+  end
+  if t ~= 'table' then
+    return 'null'
+  end
+  local is_array = true
+  local max_n = 0
+  for k, _ in pairs(value) do
+    if type(k) ~= 'number' or k < 1 or k ~= math.floor(k) then
+      is_array = false
+      break
+    end
+    if k > max_n then max_n = k end
+  end
+  if is_array and (max_n == #value or max_n == 0) then
+    local parts = {}
+    for i = 1, #value do
+      parts[i] = encode_json(value[i])
+    end
+    return '[' .. table.concat(parts, ',') .. ']'
+  end
+  local parts = {}
+  for k, v in pairs(value) do
+    if type(k) == 'string' then
+      parts[#parts + 1] = escape_str(k) .. ':' .. encode_json(v)
+    end
+  end
+  table.sort(parts)
+  return '{' .. table.concat(parts, ',') .. '}'
+end
+
+local function skip_ws(s, i)
+  while true do
+    local c = s:sub(i, i)
+    if c ~= ' ' and c ~= '\n' and c ~= '\r' and c ~= '\t' then
+      return i
+    end
+    i = i + 1
+    if i > #s then return i end
+  end
+end
+
+local function parse_json(s, i)
+  i = skip_ws(s, i or 1)
+  local c = s:sub(i, i)
+  if c == '"' then
+    local out = {}
+    i = i + 1
+    while i <= #s do
+      local ch = s:sub(i, i)
+      if ch == '"' then
+        return table.concat(out), i + 1
+      end
+      if ch == '\\' then
+        local n = s:sub(i + 1, i + 1)
+        if n == 'n' then out[#out + 1] = '\n'
+        elseif n == 'r' then out[#out + 1] = '\r'
+        elseif n == 't' then out[#out + 1] = '\t'
+        else out[#out + 1] = n end
+        i = i + 2
+      else
+        out[#out + 1] = ch
+        i = i + 1
+      end
+    end
+    return nil, i
+  end
+  if c == '{' then
+    local obj = {}
+    i = i + 1
+    i = skip_ws(s, i)
+    if s:sub(i, i) == '}' then return obj, i + 1 end
+    while i <= #s do
+      local key
+      key, i = parse_json(s, i)
+      if type(key) ~= 'string' then return nil, i end
+      i = skip_ws(s, i)
+      if s:sub(i, i) ~= ':' then return nil, i end
+      local val
+      val, i = parse_json(s, i + 1)
+      obj[key] = val
+      i = skip_ws(s, i)
+      local sep = s:sub(i, i)
+      if sep == '}' then return obj, i + 1 end
+      if sep ~= ',' then return nil, i end
+      i = skip_ws(s, i + 1)
+    end
+    return nil, i
+  end
+  if c == '[' then
+    local arr = {}
+    i = i + 1
+    i = skip_ws(s, i)
+    if s:sub(i, i) == ']' then return arr, i + 1 end
+    while i <= #s do
+      local val
+      val, i = parse_json(s, i)
+      arr[#arr + 1] = val
+      i = skip_ws(s, i)
+      local sep = s:sub(i, i)
+      if sep == ']' then return arr, i + 1 end
+      if sep ~= ',' then return nil, i end
+      i = skip_ws(s, i + 1)
+    end
+    return nil, i
+  end
+  if s:sub(i, i + 3) == 'true' then return true, i + 4 end
+  if s:sub(i, i + 4) == 'false' then return false, i + 5 end
+  if s:sub(i, i + 3) == 'null' then return nil, i + 4 end
+  local num, rest = s:match('^([%-]?%d+%.?%d*[eE]?[%+%-]?%d*)()', i)
+  if num then return tonumber(num), rest end
+  return nil, i
+end
+
+function M.pack(state, meta)
+  meta = meta or {}
+  if state == nil or #state.samples == 0 then
+    return nil, 'No lead recorded'
+  end
+  local samples = {}
+  for i = 1, #state.samples do
+    local s = state.samples[i]
+    samples[i] = pose_copy(s)
+    samples[i].t = s.t or 0
+  end
+  return {
+    version = 1,
+    kind = 'lead_chase',
+    carId = meta.carId or '',
+    trackId = meta.trackId or '',
+    sampleCount = #samples,
+    samples = samples,
+  }
+end
+
+function M.encode(payload)
+  if payload == nil then return nil end
+  return encode_json(payload)
+end
+
+function M.decode(text)
+  if type(text) ~= 'string' or text == '' then
+    return nil, 'Empty file'
+  end
+  local data = select(1, parse_json(text, 1))
+  if type(data) ~= 'table' then
+    return nil, 'Bad file'
+  end
+  return data
+end
+
+function M.apply_pack(state, payload)
+  if state == nil or type(payload) ~= 'table' then
+    return nil, 'Bad data'
+  end
+  if payload.kind ~= nil and payload.kind ~= 'lead_chase' then
+    return nil, 'Not a lead chase file'
+  end
+  local samples_in = payload.samples
+  if type(samples_in) ~= 'table' or #samples_in == 0 then
+    return nil, 'No samples in file'
+  end
+  local samples = {}
+  local elapsed = 0
+  for i = 1, #samples_in do
+    local s = pose_copy(samples_in[i])
+    s.t = samples_in[i].t or elapsed
+    if s.t > elapsed then elapsed = s.t end
+    samples[i] = s
+  end
+  state.recording = false
+  state.samples = samples
+  state.elapsed = elapsed
+  hide_lead(state)
+  state.notice = 'Lead imported'
+  return {
+    carId = payload.carId or '',
+    trackId = payload.trackId or '',
+  }
+end
+
 return M

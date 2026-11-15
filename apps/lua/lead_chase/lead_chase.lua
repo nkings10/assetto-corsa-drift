@@ -19,6 +19,69 @@ local state = logic.create()
 local deck_seq = 0
 local deck = nil
 local ghost_car_id = nil
+local run_name = 'run'
+local run_files = nil
+local run_pick = 1
+local run_folder_cached = nil
+
+local function runs_folder()
+  if run_folder_cached ~= nil then return run_folder_cached end
+  local docs = nil
+  if ac.getFolder and ac.FolderID then
+    if ac.FolderID.Documents then
+      docs = ac.getFolder(ac.FolderID.Documents)
+    elseif ac.FolderID.ACDocuments then
+      docs = ac.getFolder(ac.FolderID.ACDocuments)
+    end
+  end
+  if type(docs) ~= 'string' or docs == '' then
+    docs = ac.getFolder and ac.getFolder(ac.FolderID.ACApps) or 'apps/lua/lead_chase'
+    run_folder_cached = docs .. '/lua/lead_chase/runs'
+  else
+    run_folder_cached = docs .. '/lead_chase_runs'
+  end
+  return run_folder_cached
+end
+
+local function ensure_runs_folder()
+  local folder = runs_folder()
+  if io ~= nil and io.createDir ~= nil then
+    pcall(io.createDir, folder)
+  end
+  return folder
+end
+
+local function sanitize_name(name)
+  name = tostring(name or 'run')
+  name = name:gsub('[^%w%-%_]+', '_')
+  if name == '' then name = 'run' end
+  return name
+end
+
+local function track_id()
+  if ac.getTrackFullID ~= nil then
+    local ok, id = pcall(ac.getTrackFullID, '_')
+    if ok and type(id) == 'string' then return id end
+  end
+  if ac.getTrackID ~= nil then
+    local ok, id = pcall(ac.getTrackID)
+    if ok and type(id) == 'string' then return id end
+  end
+  return ''
+end
+
+local function refresh_run_files()
+  run_files = {}
+  local folder = ensure_runs_folder()
+  if io == nil or io.scanDir == nil then return end
+  local files = io.scanDir(folder, '*.lead')
+  if files == nil then return end
+  for i = 1, #files do
+    run_files[#run_files + 1] = files[i]
+  end
+  table.sort(run_files)
+  if run_pick > #run_files then run_pick = math.max(1, #run_files) end
+end
 
 local ACTIONS = {
   [1] = logic.RECORD,
@@ -193,6 +256,70 @@ local function context()
   }
 end
 
+local function export_run()
+  if #state.samples == 0 then
+    state.notice = 'No lead recorded'
+    return
+  end
+  local folder = ensure_runs_folder()
+  local name = sanitize_name(run_name)
+  local path = folder .. '/' .. name .. '.lead'
+  local payload, err = logic.pack(state, {
+    carId = ghost_car_id or player_car_id() or '',
+    trackId = track_id(),
+  })
+  if payload == nil then
+    state.notice = err or 'Export failed'
+    return
+  end
+  local text = logic.encode(payload)
+  if text == nil or io == nil or io.save == nil then
+    state.notice = 'Export failed'
+    return
+  end
+  local ok = io.save(path, text)
+  if ok then
+    state.notice = 'Exported ' .. name .. '.lead'
+    refresh_run_files()
+  else
+    state.notice = 'Export save failed'
+  end
+end
+
+local function import_run()
+  refresh_run_files()
+  if run_files == nil or #run_files == 0 then
+    state.notice = 'No .lead files in runs folder'
+    return
+  end
+  local name = run_files[run_pick]
+  if name == nil then
+    state.notice = 'Pick a run file'
+    return
+  end
+  local path = ensure_runs_folder() .. '/' .. name
+  if io == nil or io.load == nil then
+    state.notice = 'Import failed'
+    return
+  end
+  local text = io.load(path)
+  local payload, err = logic.decode(text)
+  if payload == nil then
+    state.notice = err or 'Bad lead file'
+    return
+  end
+  local meta, aerr = logic.apply_pack(state, payload)
+  if meta == nil then
+    state.notice = aerr or 'Import failed'
+    return
+  end
+  if meta.carId ~= nil and meta.carId ~= '' then
+    ghost_car_id = meta.carId
+  end
+  ghost.hide()
+  state.notice = 'Imported ' .. name
+end
+
 local function press(action)
   logic.handle(state, action, context())
   if state.pulse == 'teleport' then
@@ -289,4 +416,38 @@ function script.windowMain(dt)
   if ui.button('Teleport') then press(logic.TELEPORT) end
   ui.sameLine(0, 8)
   if ui.button('Clear') then press(logic.CLEAR) end
+
+  ui.separator()
+  ui.text('Share run')
+  ui.text(runs_folder())
+  if ui.inputText ~= nil then
+    local ok, a, b = pcall(ui.inputText, 'Name', run_name)
+    if ok then
+      if type(a) == 'string' and a ~= '' then
+        run_name = a
+      elseif type(b) == 'string' and b ~= '' then
+        run_name = b
+      end
+    end
+  end
+  if run_name == nil or run_name == '' then run_name = 'run' end
+  if ui.button('Export .lead') then export_run() end
+  ui.sameLine(0, 8)
+  if ui.button('Refresh list') then refresh_run_files() end
+  if run_files == nil then refresh_run_files() end
+  if run_files ~= nil and #run_files > 0 then
+    if ui.button('<') then
+      run_pick = math.max(1, run_pick - 1)
+    end
+    ui.sameLine(0, 8)
+    ui.text(tostring(run_files[run_pick] or ''))
+    ui.sameLine(0, 8)
+    if ui.button('>') then
+      run_pick = math.min(#run_files, run_pick + 1)
+    end
+  else
+    ui.text('No .lead files yet')
+  end
+  if ui.button('Import .lead') then import_run() end
+  ui.text('Friend needs the same car. Same track helps.')
 end
