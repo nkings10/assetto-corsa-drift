@@ -17,6 +17,7 @@ local car_lights = sibling('car_lights.lua')
 local wetness = sibling('wetness.lua')
 local height = sibling('height.lua')
 local wipers = sibling('wipers.lua')
+local smoke = sibling('smoke.lua')
 local light_data = nil
 
 local node = nil
@@ -797,6 +798,16 @@ local function ensure_smoke()
   end
 end
 
+local function wheel_world(index)
+  local ref = tyre_ref[index] or wheel_ref[index]
+  if ref == nil or ref.getWorldTransformationRaw == nil then return nil end
+  local ok, wm = pcall(ref.getWorldTransformationRaw, ref)
+  if not ok or wm == nil then return nil end
+  local point = wm.row4 or wm.position
+  if point == nil or type(point.x) ~= 'number' then return nil end
+  return { x = point.x, y = point.y, z = point.z }
+end
+
 local function update_smoke(pose, look, side, pos, dt)
   ensure_smoke()
   if smoke_main == nil or pose == nil or pos == nil or look == nil or side == nil then return end
@@ -814,7 +825,7 @@ local function update_smoke(pose, look, side, pos, dt)
   smoke_clock = now
 
   local intensity = clamp((drift - 5) / 35, 0, 1) * clamp((speed - 12) / 68, 0, 1)
-  local wheel_base, track_half, wheel_r = 1.35, 0.72, 0.33
+  local wheel_r = smoke.radius()
   local vel = v3(pose.vel)
   local kick = speed * 0.012 * intensity
   local kick_x, kick_z = -look.x * kick, -look.z * kick
@@ -822,12 +833,8 @@ local function update_smoke(pose, look, side, pos, dt)
   local slip_x = side.x * slip_sign * speed * 0.006
   local slip_z = side.z * slip_sign * speed * 0.006
 
-  local rl_x = pos.x - look.x * wheel_base + side.x * track_half
-  local rl_y = pos.y - look.y * wheel_base + side.y * track_half + 0.02
-  local rl_z = pos.z - look.z * wheel_base + side.z * track_half
-  local rr_x = pos.x - look.x * wheel_base - side.x * track_half
-  local rr_y = pos.y - look.y * wheel_base - side.y * track_half + 0.02
-  local rr_z = pos.z - look.z * wheel_base - side.z * track_half
+  local rl_x, rl_y, rl_z = smoke.contact(pos, look, side, wheel_world(3), 1)
+  local rr_x, rr_y, rr_z = smoke.contact(pos, look, side, wheel_world(4), -1)
 
   local main_amount = 0.8 + intensity * 3.5
   for i = 1, 2 do
