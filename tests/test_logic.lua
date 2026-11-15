@@ -1,4 +1,4 @@
-local logic = dofile('apps/lua/solo_tandem/logic.lua')
+local logic = dofile('apps/lua/solo_tandems/logic.lua')
 
 local failures = 0
 
@@ -43,7 +43,7 @@ end
 do
   local state = logic.create()
   logic.handle(state, logic.APPEAR, two)
-  check('appear without a lead does nothing', not state.placed and state.notice == 'No lead recorded')
+  check('appear without a lead does nothing', not state.placed and state.notice == 'No lead run recorded')
   logic.handle(state, logic.RECORD, two)
   logic.capture(state, 0.1, pose(0, 0, 1))
   logic.handle(state, logic.APPEAR, two)

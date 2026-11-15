@@ -147,7 +147,7 @@ function M.handle(state, action, ctx)
       if #state.samples == 0 then
         state.notice = 'Recording is empty'
       else
-        state.notice = 'Lead saved'
+        state.notice = 'Lead run saved'
       end
       return state
     end
@@ -164,7 +164,7 @@ function M.handle(state, action, ctx)
     state.samples = {}
     state.elapsed = 0
     hide_lead(state)
-    state.notice = 'Lead cleared'
+    state.notice = 'Lead run cleared'
     return state
   end
 
@@ -175,7 +175,7 @@ function M.handle(state, action, ctx)
     end
     local pose = pose_copy(ctx.pose)
     state.spot = { pos = pose.pos, dir = pose.dir }
-    state.notice = 'Chase spot saved'
+    state.notice = 'Chase car set'
     return state
   end
 
@@ -186,7 +186,7 @@ function M.handle(state, action, ctx)
 
   if action == M.APPEAR then
     if #state.samples == 0 then
-      state.notice = 'No lead recorded'
+      state.notice = 'No lead run recorded'
       return state
     end
     state.placed = true
@@ -197,7 +197,7 @@ function M.handle(state, action, ctx)
 
   if action == M.START then
     if not state.placed then
-      state.notice = 'Put the lead in place first'
+      state.notice = 'Spawn the lead car first'
       return state
     end
     state.playing = true
@@ -208,7 +208,7 @@ function M.handle(state, action, ctx)
 
   if action == M.TELEPORT then
     if state.spot == nil then
-      state.notice = 'Save a chase spot first'
+      state.notice = 'Set the chase car first'
       return state
     end
     if not can_move then
@@ -236,7 +236,7 @@ function M.capture(state, dt, pose)
   if dt < 0 then dt = 0 end
   if state.elapsed + dt > MAX_SECONDS then
     state.recording = false
-    state.notice = 'Lead saved'
+    state.notice = 'Lead run saved'
     return
   end
   state.elapsed = state.elapsed + dt
@@ -458,7 +458,7 @@ end
 function M.pack(state, meta)
   meta = meta or {}
   if state == nil or #state.samples == 0 then
-    return nil, 'No lead recorded'
+    return nil, 'No lead run recorded'
   end
   local samples = {}
   for i = 1, #state.samples do
@@ -468,7 +468,7 @@ function M.pack(state, meta)
   end
   return {
     version = 1,
-    kind = 'lead_chase',
+    kind = 'solo_tandems',
     carId = meta.carId or '',
     trackId = meta.trackId or '',
     sampleCount = #samples,
@@ -497,8 +497,8 @@ function M.apply_pack(state, payload, opts)
   if state == nil or type(payload) ~= 'table' then
     return nil, 'Bad data'
   end
-  if payload.kind ~= nil and payload.kind ~= 'lead_chase' then
-    return nil, 'Not a lead chase file'
+  if payload.kind ~= nil and payload.kind ~= 'solo_tandems' and payload.kind ~= 'lead_chase' then
+    return nil, 'Not a Solo Tandems file'
   end
   local file_track = tostring(payload.trackId or '')
   local current_track = tostring(opts.trackId or '')
@@ -521,7 +521,7 @@ function M.apply_pack(state, payload, opts)
   state.samples = samples
   state.elapsed = elapsed
   hide_lead(state)
-  state.notice = 'Lead imported'
+  state.notice = 'Lead run imported'
   return {
     carId = payload.carId or '',
     trackId = file_track,

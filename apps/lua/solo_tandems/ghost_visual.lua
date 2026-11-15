@@ -58,7 +58,7 @@ local smooth_gas = 0
 local glow_brake = {
   meshes = nil,
   values = { gGlowColor = rgbm(1.5, 0.05, 0.02, 1) },
-  cacheKey = 'leadChaseBrkGlow',
+  cacheKey = 'soloTandemsBrkGlow',
   defines = [[
     float4 main(PS_IN pin) {
       return float4(gGlowColor.rgb, 1);
@@ -68,7 +68,7 @@ local glow_brake = {
 local glow_head = {
   meshes = nil,
   values = { gGlowColor = rgbm(1.5, 1.5, 1.35, 1) },
-  cacheKey = 'leadChaseHLGlow',
+  cacheKey = 'soloTandemsHLGlow',
   defines = [[
     float4 main(PS_IN pin) {
       return float4(gGlowColor.rgb, 1);
@@ -78,7 +78,7 @@ local glow_head = {
 local glow_tail = {
   meshes = nil,
   values = { gGlowColor = rgbm(0.6, 0.01, 0.01, 1) },
-  cacheKey = 'leadChaseTLGlow',
+  cacheKey = 'soloTandemsTLGlow',
   defines = [[
     float4 main(PS_IN pin) {
       return float4(gGlowColor.rgb, 1);
@@ -724,7 +724,7 @@ function M.ensure(car_id)
     return false
   end
   local ok_node, created = pcall(function()
-    return cars_root:createBoundingSphereNode('LeadChaseGhost', 12)
+    return cars_root:createBoundingSphereNode('SoloTandemsGhost', 12)
   end)
   if not ok_node or created == nil then
     status = 'node failed'

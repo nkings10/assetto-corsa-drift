@@ -2,11 +2,11 @@
 -- Custom Shaders Patch 0.2.11. No second physics car — wheels/lights animate on the ghost.
 
 local function app_file(name)
-  local folder = 'apps/lua/solo_tandem/'
+  local folder = 'apps/lua/solo_tandems/'
   if ac.getFolder and ac.FolderID and ac.FolderID.ACApps then
     local apps = ac.getFolder(ac.FolderID.ACApps)
     if type(apps) == 'string' and apps ~= '' then
-      folder = apps .. '/lua/solo_tandem/'
+      folder = apps .. '/lua/solo_tandems/'
     end
   end
   return folder .. name
@@ -31,7 +31,7 @@ local run_folder_edit = nil
 
 local settings = nil
 if ac.storage ~= nil then
-  local ok, stored = pcall(ac.storage, { runsFolder = '' }, 'soloTandem.')
+  local ok, stored = pcall(ac.storage, { runsFolder = '' }, 'soloTandems.')
   if ok then settings = stored end
 end
 
@@ -56,7 +56,7 @@ local function default_runs_folder()
   end
   local apps = ac.getFolder and ac.FolderID and ac.getFolder(ac.FolderID.ACApps)
   if type(apps) == 'string' and apps ~= '' then
-    return apps .. '/lua/solo_tandem/runs'
+    return apps .. '/lua/solo_tandems/runs'
   end
   return 'Solo Tandems'
 end
@@ -137,8 +137,8 @@ local ACTIONS = {
 
 local NAMES = {
   record = logic.RECORD,
-  appear = logic.APPEAR,
-  spot = logic.SPOT,
+  spawn = logic.APPEAR,
+  chase = logic.SPOT,
   teleport = logic.TELEPORT,
   start = logic.START,
   clear = logic.CLEAR,
@@ -152,12 +152,12 @@ local function bind(id)
 end
 
 local buttons = {
-  { key = 'record', button = bind('Solo Tandems/Record') },
-  { key = 'appear', button = bind('Solo Tandems/Appear') },
-  { key = 'spot', button = bind('Solo Tandems/Chase spot') },
+  { key = 'record', button = bind('Solo Tandems/Record Lead Run') },
+  { key = 'spawn', button = bind('Solo Tandems/Spawn Lead Car') },
+  { key = 'chase', button = bind('Solo Tandems/Set Chase Car') },
   { key = 'teleport', button = bind('Solo Tandems/Teleport') },
   { key = 'start', button = bind('Solo Tandems/Start') },
-  { key = 'clear', button = bind('Solo Tandems/Clear lead') },
+  { key = 'clear', button = bind('Solo Tandems/Clear Lead Run') },
 }
 
 local function vec3_of(v)
@@ -375,7 +375,7 @@ end
 
 local function export_run()
   if #state.samples == 0 then
-    state.notice = 'No lead recorded'
+    state.notice = 'No lead run recorded'
     return
   end
   local folder = ensure_runs_folder()
@@ -422,7 +422,7 @@ local function import_run()
   local text = io.load(path)
   local payload, err = logic.decode(text)
   if payload == nil then
-    state.notice = err or 'Bad lead file'
+    state.notice = err or 'Bad lead run file'
     return
   end
   local meta, aerr = logic.apply_pack(state, payload, { trackId = track_id() })
@@ -468,7 +468,7 @@ end
 local function ensure_deck()
   if deck ~= nil or ac.connect == nil or ac.StructItem == nil then return end
   local ok, link = pcall(ac.connect, {
-    ac.StructItem.key('leadChase.v1'),
+    ac.StructItem.key('soloTandems.v1'),
     seq = ac.StructItem.int32(),
     action = ac.StructItem.int32(),
   })
@@ -576,10 +576,10 @@ function script.windowMain(dt)
   ui.separator()
   if ui.button('Record') then press(logic.RECORD) end
   ui.sameLine(0, 8)
-  if ui.button('Appear') then press(logic.APPEAR) end
+  if ui.button('Spawn') then press(logic.APPEAR) end
   ui.sameLine(0, 8)
   if ui.button('Start') then press(logic.START) end
-  if ui.button('Chase spot') then press(logic.SPOT) end
+  if ui.button('Chase') then press(logic.SPOT) end
   ui.sameLine(0, 8)
   if ui.button('Teleport') then press(logic.TELEPORT) end
   ui.sameLine(0, 8)

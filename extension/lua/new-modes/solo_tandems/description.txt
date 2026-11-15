@@ -1,0 +1,8 @@
+Solo Tandems
+
+One-car Practice with extended physics for lead chase.
+Spawn in pits so you can open setup and teleport back to pits like normal Practice.
+Open the Solo Tandems app, record a lead run (or import a .lead), pick the lead car if you want, Spawn, set chase car, Start.
+
+The lead is a visual ghost — no second physics car. Chase-car teleport needs extended physics (forced on here).
+Lap cuts are disarmed so off-track chase lines do not spam “Cut detected”.
