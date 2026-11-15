@@ -70,6 +70,13 @@ local function copy_side(side, dir, up)
   })
 end
 
+local function vec_ok(v)
+  return type(v) == 'table'
+    and type(v.x) == 'number'
+    and type(v.y) == 'number'
+    and type(v.z) == 'number'
+end
+
 local function pose_copy(pose)
   local dir = normalize(pose.dir)
   local up = copy_up(pose.up)
@@ -512,8 +519,12 @@ function M.apply_pack(state, payload, opts)
   local samples = {}
   local elapsed = 0
   for i = 1, #samples_in do
-    local s = pose_copy(samples_in[i])
-    s.t = samples_in[i].t or elapsed
+    local raw = samples_in[i]
+    if type(raw) ~= 'table' or not vec_ok(raw.pos) or not vec_ok(raw.dir) then
+      return nil, 'Bad file'
+    end
+    local s = pose_copy(raw)
+    s.t = raw.t or elapsed
     if s.t > elapsed then elapsed = s.t end
     samples[i] = s
   end

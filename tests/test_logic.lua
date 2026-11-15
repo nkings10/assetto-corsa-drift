@@ -162,6 +162,10 @@ do
     'import rejects wrong track',
     ok == nil and #blocked.samples == 0 and type(err) == 'string' and err:find('Needs track: test_track', 1, true)
   )
+  decoded.samples[1].pos = nil
+  local broken = logic.create()
+  local bad, why = logic.apply_pack(broken, decoded, { trackId = 'test_track' })
+  check('import without a position says bad file', bad == nil and why == 'Bad file' and #broken.samples == 0)
 end
 
 if failures > 0 then
