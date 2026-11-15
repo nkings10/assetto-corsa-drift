@@ -425,9 +425,13 @@ local function import_run()
     state.notice = err or 'Bad lead run file'
     return
   end
-  local meta, aerr = logic.apply_pack(state, payload, { trackId = track_id() })
+  local ok, meta, aerr = pcall(logic.apply_pack, state, payload, { trackId = track_id() })
+  if not ok then
+    state.notice = 'Bad file'
+    return
+  end
   if meta == nil then
-    state.notice = aerr or 'Import failed'
+    state.notice = aerr or 'Bad file'
     return
   end
   if meta.carId ~= nil and meta.carId ~= '' then
