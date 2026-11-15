@@ -407,6 +407,8 @@ local function skip_ws(s, i)
   end
 end
 
+local JSON_NULL = {}
+
 local function parse_json(s, i)
   i = skip_ws(s, i or 1)
   local c = s:sub(i, i)
@@ -445,6 +447,7 @@ local function parse_json(s, i)
       if s:sub(i, i) ~= ':' then return nil, i end
       local val
       val, i = parse_json(s, i + 1)
+      if val == nil or val == JSON_NULL then return nil, i end
       obj[key] = val
       i = skip_ws(s, i)
       local sep = s:sub(i, i)
@@ -462,6 +465,7 @@ local function parse_json(s, i)
     while i <= #s do
       local val
       val, i = parse_json(s, i)
+      if val == nil or val == JSON_NULL then return nil, i end
       arr[#arr + 1] = val
       i = skip_ws(s, i)
       local sep = s:sub(i, i)
@@ -473,7 +477,7 @@ local function parse_json(s, i)
   end
   if s:sub(i, i + 3) == 'true' then return true, i + 4 end
   if s:sub(i, i + 4) == 'false' then return false, i + 5 end
-  if s:sub(i, i + 3) == 'null' then return nil, i + 4 end
+  if s:sub(i, i + 3) == 'null' then return JSON_NULL, i + 4 end
   local num, rest = s:match('^([%-]?%d+%.?%d*[eE]?[%+%-]?%d*)()', i)
   if num then return tonumber(num), rest end
   return nil, i
@@ -510,7 +514,7 @@ function M.decode(text)
     return nil, 'Empty file'
   end
   local data = select(1, parse_json(text, 1))
-  if type(data) ~= 'table' then
+  if data == JSON_NULL or type(data) ~= 'table' then
     return nil, 'Bad file'
   end
   return data

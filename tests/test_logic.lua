@@ -235,6 +235,24 @@ do
   check('stopping yourself still says saved', stopped.notice == 'Lead run saved')
 end
 
+do
+  local broken, why = logic.decode('{"kind":"solo_tandems","samples":[{"t":1},null,{"t":2}]}')
+  check('null in a lead file is a bad file', broken == nil and why == 'Bad file')
+  local missing, missing_why = logic.decode('{"kind":"solo_tandems","samples":[{"pos":null,"dir":{"x":0,"y":0,"z":1}}]}')
+  check('null position is a bad file', missing == nil and missing_why == 'Bad file')
+  local kept = logic.create()
+  kept.samples = { pose(1, 2) }
+  local bad_meta, bad_err = logic.apply_pack(kept, {
+    kind = 'solo_tandems',
+    trackId = 'test_track',
+    samples = { { t = 1 } },
+  }, { trackId = 'test_track' })
+  check(
+    'a sample without a position is a bad file',
+    bad_meta == nil and bad_err == 'Bad file' and #kept.samples == 1
+  )
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
