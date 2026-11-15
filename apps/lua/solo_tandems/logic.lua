@@ -95,6 +95,7 @@ local function pose_copy(pose)
     drift = pose.drift or 0,
     speed = pose.speed or 0,
     wheels = copy_wheels(pose.wheels),
+    wipers = pose.wipers or 0,
   }
 end
 
@@ -113,6 +114,7 @@ local function hold_pose(sample)
     drift = 0,
     speed = 0,
     wheels = { 0, 0, 0, 0 },
+    wipers = sample.wipers or 0,
   }
 end
 
@@ -298,6 +300,7 @@ function M.lead_position(state, dt)
       drift = first.drift or 0,
       speed = first.speed or 0,
       wheels = copy_wheels(first.wheels),
+      wipers = first.wipers or 0,
     }, 'play'
   end
   if last.t - state.play_t <= 0.0001 then
@@ -338,6 +341,7 @@ function M.lead_position(state, dt)
     drift = (a.drift or 0) + ((b.drift or 0) - (a.drift or 0)) * u,
     speed = (a.speed or 0) + ((b.speed or 0) - (a.speed or 0)) * u,
     wheels = lerp_wheels(a.wheels, b.wheels, u),
+    wipers = (a.wipers or 0) + ((b.wipers or 0) - (a.wipers or 0)) * u,
   }, 'play'
 end
 

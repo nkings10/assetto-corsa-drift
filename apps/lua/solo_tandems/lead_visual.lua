@@ -48,8 +48,6 @@ local steer_orig = nil
 
 local wiper_nodes = {}
 local wiper_ksanim = nil
-local wiper_t = 0
-local wipers_moving = false
 
 local brake_meshes = nil
 local head_meshes = nil
@@ -406,13 +404,6 @@ local function apply_steer_wheel(angle)
   m.row3.x, m.row3.y, m.row3.z = orig.row3.x, orig.row3.y, orig.row3.z
 end
 
-local function rain_intensity()
-  if ac.getSim == nil then return 0 end
-  local ok, sim = pcall(ac.getSim)
-  if not ok or sim == nil then return 0 end
-  return sim.rainIntensity or 0
-end
-
 local function apply_wiper_pose(progress, angle)
   if wiper_ksanim ~= nil and node ~= nil then
     pcall(function()
@@ -436,20 +427,9 @@ local function apply_wiper_pose(progress, angle)
   end
 end
 
-local function update_wipers(dt)
-  if not wipers.active(rain_intensity()) then
-    if wipers_moving then
-      wipers_moving = false
-      wiper_t = 0
-      apply_wiper_pose(0, 0)
-    end
-    return
-  end
-  wipers_moving = true
-  wiper_t = wiper_t + dt * 1.2
-  local progress = math.abs(math.sin(wiper_t * math.pi))
-  local angle = math.sin(wiper_t * math.pi * 2) * math.rad(55)
-  apply_wiper_pose(progress, angle)
+local function update_wipers(pose)
+  local progress = wipers.progress(pose and pose.wipers)
+  apply_wiper_pose(progress, wipers.angle(progress))
 end
 
 local function hide_light(light)
@@ -1213,8 +1193,6 @@ function M.ensure(car_id)
   ready = true
   was_hidden = true
   height_gap = nil
-  wiper_t = 0
-  wipers_moving = true
   ground_bias = ground_offset
   status = 'ok ' .. tostring(path:match('[^/\\]+$') or path)
   return true
@@ -1293,7 +1271,7 @@ function M.show(pose, dt)
     end
   end
 
-  update_wipers(dt)
+  update_wipers(pose)
   set_running_lights(true)
   update_running_lights(look, up, side, pos)
   set_brake_visual((pose.brake or 0) > 0.08, look, up, side, pos)

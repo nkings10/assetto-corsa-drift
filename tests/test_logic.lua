@@ -309,9 +309,42 @@ end
 local wipers = dofile('apps/lua/solo_tandems/wipers.lua')
 
 do
-  check('dry track leaves the wipers parked', not wipers.active(0) and not wipers.active(0.01))
-  check('rain moves the wipers', wipers.active(0.02) and wipers.active(1))
-  check('a missing rain reading leaves the wipers parked', not wipers.active(nil) and not wipers.active('rain'))
+  check('a missing wiper reading is parked', wipers.progress(nil) == 0 and wipers.angle(nil) == 0)
+  check('a recorded sweep is kept', math.abs(wipers.progress(0.4) - 0.4) < 1e-9)
+  check('a full sweep is the wiper travel', math.abs(wipers.angle(1) - math.rad(55)) < 1e-9)
+  check('a parked wiper stays at rest', wipers.angle(0) == 0)
+end
+
+do
+  local state = logic.create()
+  logic.handle(state, logic.RECORD, two)
+  logic.capture(state, 1 / 30, pose(0, 0, 0))
+  check('a sample without wipers is parked', state.samples[1].wipers == 0)
+  logic.handle(state, logic.CLEAR, two)
+  logic.handle(state, logic.RECORD, two)
+  local first = pose(1, 0, 0)
+  first.wipers = 0.25
+  local second = pose(2, 0, 0)
+  second.wipers = 0.75
+  logic.capture(state, 1 / 30, first)
+  logic.capture(state, 1 / 30, second)
+  logic.handle(state, logic.RECORD, two)
+  check('a sample keeps the wiper position', math.abs(state.samples[1].wipers - 0.25) < 1e-9)
+  logic.handle(state, logic.SPAWN, two)
+  local held = logic.lead_position(state, 0)
+  check('a waiting lead keeps the wiper position', math.abs(held.wipers - 0.25) < 1e-9)
+  logic.handle(state, logic.START, two)
+  local mid
+  local guard = 0
+  repeat
+    mid = logic.lead_position(state, 1 / 120)
+    guard = guard + 1
+  until guard > 30 or (state.play_t > state.samples[1].t and state.play_t < state.samples[2].t)
+  local a = state.samples[1]
+  local b = state.samples[2]
+  local u = (state.play_t - a.t) / (b.t - a.t)
+  local expect = a.wipers + (b.wipers - a.wipers) * u
+  check('playback blends the wiper position', math.abs(mid.wipers - expect) < 1e-6)
 end
 
 local smoke = dofile('apps/lua/solo_tandems/smoke.lua')

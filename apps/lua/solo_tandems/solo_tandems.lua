@@ -232,6 +232,7 @@ local function read_pose(car)
     drift = read_drift(car, vel, dir),
     speed = car.speedKmh or math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) * 3.6,
     wheels = read_wheels(car),
+    wipers = car.wiperProgress or 0,
   }
 end
 
