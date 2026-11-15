@@ -239,7 +239,11 @@ function M.capture(state, dt, pose)
     state.notice = '15 minute recording limit reached'
     return
   end
+  local was = state.elapsed
   state.elapsed = state.elapsed + dt
+  if was < MAX_SECONDS - 60 and state.elapsed >= MAX_SECONDS - 60 then
+    state.notice = '60 seconds of recording left'
+  end
   local sample = pose_copy(pose)
   sample.t = state.elapsed
   state.samples[#state.samples + 1] = sample
