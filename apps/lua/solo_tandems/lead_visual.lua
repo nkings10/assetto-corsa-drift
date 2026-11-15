@@ -724,7 +724,7 @@ function M.ensure(car_id)
     return false
   end
   local ok_node, created = pcall(function()
-    return cars_root:createBoundingSphereNode('SoloTandemsLead', 12)
+    return cars_root:createBoundingSphereNode('soloTandemsLead', 12)
   end)
   if not ok_node or created == nil then
     status = 'node failed'
