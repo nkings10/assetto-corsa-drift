@@ -15,6 +15,7 @@ end
 local logic = dofile(app_file('logic.lua'))
 local lead_visual = dofile(app_file('lead_visual.lua'))
 local setup_slot = dofile(app_file('setup_slot.lua'))
+local setups = dofile(app_file('setups.lua'))
 
 local state = logic.create()
 local deck = nil
@@ -25,6 +26,10 @@ local run_name = 'run'
 local run_files = nil
 local run_pick = 1
 local run_folder_edit = nil
+local setup_name = ''
+local setup_entries = {}
+local setup_pick = 1
+local setup_selected = nil
 
 local settings = nil
 if ac.storage ~= nil then
@@ -293,6 +298,219 @@ local function player_car_id()
   return nil
 end
 
+local function setup_files(folder)
+  local files = {}
+  if io == nil or io.scanDir == nil or folder == nil or folder == '' then return files end
+  local ok, list = pcall(io.scanDir, folder, '*.ini')
+  if not ok or type(list) ~= 'table' then return files end
+  for i = 1, #list do
+    files[#files + 1] = list[i]
+  end
+  return files
+end
+
+local function refresh_setup_entries()
+  local car = player_car_id()
+  local root = setups_root()
+  if car == nil or root == nil then
+    setup_entries = {}
+    setup_pick = 1
+    return
+  end
+  local base = root .. '/' .. car .. '/'
+  local track = current_track_folder()
+  local track_files = nil
+  if track ~= '' and track ~= 'generic' then
+    track_files = setup_files(base .. track)
+  end
+  setup_entries = setups.entries(track, setup_files(base .. 'generic'), track_files)
+  setup_pick = 1
+  if setup_selected ~= nil then
+    for i = 1, #setup_entries do
+      if setup_entries[i].path == setup_selected then
+        setup_pick = i
+        return
+      end
+    end
+  end
+  if #setup_entries == 0 then
+    setup_selected = nil
+    return
+  end
+  setup_selected = setup_entries[1].path
+end
+
+local function setup_change_allowed()
+  if ac.isCarResetAllowed == nil then return true end
+  local ok, allowed = pcall(ac.isCarResetAllowed)
+  return ok and allowed == true
+end
+
+local function save_setup(relative, notice)
+  if relative == nil then
+    state.notice = 'No track for a track default'
+    return
+  end
+  if not setup_change_allowed() then
+    state.notice = 'Setup changes in practice'
+    return
+  end
+  if ac.saveCurrentSetup == nil then
+    state.notice = 'Setup save failed'
+    return
+  end
+  local ok, saved = pcall(ac.saveCurrentSetup, relative)
+  if not ok or saved == false then
+    state.notice = 'Setup save failed'
+    return
+  end
+  if ac.refreshSetups ~= nil then pcall(ac.refreshSetups) end
+  refresh_setup_entries()
+  state.notice = notice
+end
+
+local function load_chosen_setup(relative, notice)
+  if relative == nil then
+    state.notice = 'No setup selected'
+    return
+  end
+  if not setup_change_allowed() then
+    state.notice = 'Setup changes in practice'
+    return
+  end
+  if ac.loadSetup == nil then
+    state.notice = 'Setup load failed'
+    return
+  end
+  local ok, loaded = pcall(ac.loadSetup, relative)
+  if not ok or loaded == false then
+    state.notice = 'Setup load failed'
+    return
+  end
+  state.notice = notice
+end
+
+local function read_text_input(a, b, current)
+  if type(a) == 'string' then return a end
+  if type(b) == 'string' then return b end
+  return current
+end
+
+local function apply_final_drive(drive, value)
+  if not setup_change_allowed() then
+    state.notice = 'Setup changes in practice'
+    return
+  end
+  if physics ~= nil and physics.awakeCar ~= nil then
+    pcall(physics.awakeCar, 0)
+  end
+  if ac.setSetupSpinnerValue == nil then
+    state.notice = 'Diff ratio is not available'
+    return
+  end
+  local ok, applied = pcall(ac.setSetupSpinnerValue, drive.name, value)
+  if not ok or applied == false then
+    state.notice = 'Diff ratio is not available'
+  end
+end
+
+local function draw_diff_ratio()
+  if ac.getSetupSpinners == nil then return end
+  local ok, spinners = pcall(ac.getSetupSpinners)
+  if not ok then return end
+  local drive = setups.final_drive(spinners)
+  if drive == nil then return end
+  ui.separator()
+  ui.text('Diff ratio')
+  local label = setups.final_drive_label(drive)
+  if type(drive.items) == 'table' and #drive.items > 0 and ui.combo ~= nil and ui.selectable ~= nil then
+    ui.combo('##diff', label, function()
+      for i = 1, #drive.items do
+        if ui.selectable(tostring(drive.items[i]), i - 1 == drive.value) then
+          apply_final_drive(drive, i - 1)
+        end
+      end
+    end)
+    return
+  end
+  if ui.slider == nil then
+    ui.text(label)
+    return
+  end
+  local multiplier = drive.displayMultiplier or 1
+  if multiplier == 0 then multiplier = 1 end
+  local shown = ui.slider(
+    '##diff',
+    (drive.value or 0) * multiplier,
+    (drive.min or 0) * multiplier,
+    (drive.max or 0) * multiplier,
+    'Diff ratio: %.3f'
+  )
+  if ui.itemEdited ~= nil and ui.itemEdited() and type(shown) == 'number' then
+    apply_final_drive(drive, shown / multiplier)
+  end
+end
+
+local function draw_setups()
+  ui.separator()
+  ui.text('Setup')
+  if ui.inputText ~= nil then
+    local ok, a, b = pcall(ui.inputText, 'Name', setup_name)
+    if ok then setup_name = read_text_input(a, b, setup_name) end
+  end
+  if ui.button('Save') then
+    local typed = (setup_name:match('^%s*(.-)%s*$')) or ''
+    local path = setups.named_file(setup_name)
+    if path ~= nil then
+      local leaf = path:match('([^/]+)$') or path
+      save_setup(path, 'Saved ' .. setups.display_name(leaf))
+    elseif typed:lower():gsub('%.ini$', '') == 'solo tandems' then
+      state.notice = 'Solo Tandems is saved with the default buttons'
+    else
+      state.notice = 'Type a setup name'
+    end
+  end
+  if ui.button('Save Car Default') then
+    save_setup(setups.car_default(), 'Saved car default')
+  end
+  ui.sameLine(0, 8)
+  if ui.button('Save Track Default') then
+    save_setup(setups.track_default(current_track_folder()), 'Saved track default')
+  end
+
+  ui.text('Setups')
+  refresh_setup_entries()
+  local current = setup_entries[setup_pick]
+  local preview = current and current.label or 'No setups'
+  if ui.combo ~= nil and ui.selectable ~= nil and #setup_entries > 0 then
+    local width_pushed = false
+    if ui.pushItemWidth ~= nil and ui.availableSpaceX ~= nil then
+      ui.pushItemWidth(math.max(80, ui.availableSpaceX() - 70))
+      width_pushed = true
+    end
+    ui.combo('##setups', preview, function()
+      for i = 1, #setup_entries do
+        if ui.selectable(setup_entries[i].label, i == setup_pick) then
+          setup_pick = i
+          setup_selected = setup_entries[i].path
+        end
+      end
+    end)
+    if width_pushed and ui.popItemWidth ~= nil then ui.popItemWidth() end
+  else
+    ui.text(preview)
+  end
+  ui.sameLine(0, 8)
+  if ui.button('Load') then
+    if current == nil then
+      state.notice = 'No setup selected'
+    else
+      load_chosen_setup(current.path, 'Loaded ' .. current.label)
+    end
+  end
+  draw_diff_ratio()
+end
+
 local function load_saved_setup()
   if setup_loaded or ac.loadSetup == nil then
     setup_loaded = true
@@ -525,6 +743,8 @@ function script.windowMain(dt)
   if ui.button('Teleport') then press(logic.TELEPORT) end
   ui.sameLine(0, 8)
   if ui.button('Clear') then press(logic.CLEAR) end
+
+  draw_setups()
 
   ui.separator()
   ui.text('Share run')

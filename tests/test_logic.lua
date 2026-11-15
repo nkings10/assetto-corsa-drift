@@ -448,6 +448,46 @@ do
   )
 end
 
+local setups = dofile('apps/lua/solo_tandems/setups.lua')
+
+do
+  local entries = setups.entries('spa', {
+    'Street.ini',
+    'Solo Tandems.ini',
+    'notes.txt',
+  }, {
+    'Grip.ini',
+    'solo tandems.INI',
+  })
+  check('the default setup stays out of the list', #entries == 2)
+  check(
+    'a car file is labelled Car and a track file is labelled Track',
+    entries[1].label == 'Grip (Track)' and entries[1].path == 'spa/Grip.ini'
+      and entries[2].label == 'Street (Car)' and entries[2].path == 'generic/Street.ini'
+  )
+  check(
+    'a missing track lists the car files only',
+    #setups.entries('', { 'Street.ini', 'Solo Tandems.ini' }, { 'Grip.ini' }) == 1
+      and setups.entries('', { 'Street.ini' }, { 'Grip.ini' })[1].path == 'generic/Street.ini'
+  )
+  check('the car default path is the generic Solo Tandems file', setups.car_default() == 'generic/Solo Tandems.ini')
+  check('the track default path uses the track folder', setups.track_default('spa') == 'spa/Solo Tandems.ini')
+  check('a missing track has no track default', setups.track_default('') == nil and setups.track_default('generic') == nil)
+  check('an empty name does not write a setup', setups.named_file('') == nil and setups.named_file('   ') == nil)
+  check(
+    'the typed name Solo Tandems does not write the default',
+    setups.named_file('Solo Tandems') == nil and setups.named_file('solo tandems.ini') == nil
+  )
+  check('a typed name is saved as a car setup', setups.named_file(' Wet ') == 'generic/Wet.ini')
+  check('a typed path is not saved', setups.named_file('generic/../Wet') == nil)
+  local drive = setups.final_drive({
+    { name = 'PRESSURE_LF', value = 1 },
+    { name = 'FINAL_GEAR_RATIO', value = 1, items = { '4.10', '4.30' } },
+  })
+  check('the diff ratio is the final gear', drive ~= nil and setups.final_drive_label(drive) == '4.30')
+  check('a car with no final gear has no diff ratio', setups.final_drive({ { name = 'PRESSURE_LF' } }) == nil)
+end
+
 local model_notice = dofile('apps/lua/solo_tandems/model_notice.lua')
 
 do
