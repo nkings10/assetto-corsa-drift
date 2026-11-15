@@ -33,11 +33,44 @@ local function lerp3(a, b, u)
   }
 end
 
+local function copy_wheels(wheels)
+  if wheels == nil then return { 0, 0, 0, 0 } end
+  return {
+    wheels[1] or 0,
+    wheels[2] or 0,
+    wheels[3] or 0,
+    wheels[4] or 0,
+  }
+end
+
+local function lerp_wheels(a, b, u)
+  a = a or { 0, 0, 0, 0 }
+  b = b or { 0, 0, 0, 0 }
+  return {
+    a[1] + (b[1] - a[1]) * u,
+    a[2] + (b[2] - a[2]) * u,
+    a[3] + (b[3] - a[3]) * u,
+    a[4] + (b[4] - a[4]) * u,
+  }
+end
+
 local function pose_copy(pose)
   return {
     pos = copy3(pose.pos),
     dir = normalize(pose.dir),
     vel = copy3(pose.vel or { x = 0, y = 0, z = 0 }),
+    brake = pose.brake or 0,
+    wheels = copy_wheels(pose.wheels),
+  }
+end
+
+local function hold_pose(sample)
+  return {
+    pos = copy3(sample.pos),
+    dir = copy3(sample.dir),
+    vel = { x = 0, y = 0, z = 0 },
+    brake = 0,
+    wheels = { 0, 0, 0, 0 },
   }
 end
 
@@ -200,12 +233,7 @@ function M.lead_pose(state, dt)
     return nil, 'hidden'
   end
   if not state.playing then
-    local held = state.samples[1]
-    return {
-      pos = copy3(held.pos),
-      dir = copy3(held.dir),
-      vel = { x = 0, y = 0, z = 0 },
-    }, 'hold'
+    return hold_pose(state.samples[1]), 'hold'
   end
   dt = dt or 0
   if dt < 0 then dt = 0 end
@@ -219,17 +247,15 @@ function M.lead_pose(state, dt)
       pos = copy3(first.pos),
       dir = copy3(first.dir),
       vel = copy3(first.vel),
+      brake = first.brake or 0,
+      wheels = copy_wheels(first.wheels),
     }, 'play'
   end
   if last.t - state.play_t <= 0.0001 then
     state.playing = false
     state.play_t = last.t
     state.notice = 'Lead finished'
-    return {
-      pos = copy3(last.pos),
-      dir = copy3(last.dir),
-      vel = { x = 0, y = 0, z = 0 },
-    }, 'hold'
+    return hold_pose(last), 'hold'
   end
   local t = state.play_t
   local b = samples[1]
@@ -247,6 +273,8 @@ function M.lead_pose(state, dt)
     pos = lerp3(a.pos, b.pos, u),
     dir = normalize(lerp3(a.dir, b.dir, u)),
     vel = lerp3(a.vel, b.vel, u),
+    brake = (a.brake or 0) + ((b.brake or 0) - (a.brake or 0)) * u,
+    wheels = lerp_wheels(a.wheels, b.wheels, u),
   }, 'play'
 end
 

@@ -56,6 +56,18 @@ local function vec3_of(v)
   return vec3(v.x, v.y, v.z)
 end
 
+local function read_wheels(car)
+  local wheels = { 0, 0, 0, 0 }
+  if car.wheels == nil then return wheels end
+  for i = 0, 3 do
+    local wheel = car.wheels[i]
+    if wheel ~= nil and wheel.angularSpeed ~= nil then
+      wheels[i + 1] = wheel.angularSpeed
+    end
+  end
+  return wheels
+end
+
 local function read_pose(car)
   local vel = car.velocity or vec3(0, 0, 0)
   local dir = car.look or vec3(0, 0, 1)
@@ -63,6 +75,8 @@ local function read_pose(car)
     pos = { x = car.position.x, y = car.position.y, z = car.position.z },
     dir = { x = dir.x, y = dir.y, z = dir.z },
     vel = { x = vel.x, y = vel.y, z = vel.z },
+    brake = car.brake or 0,
+    wheels = read_wheels(car),
   }
 end
 
@@ -100,19 +114,43 @@ local function move_car(index, pose, speed)
   return ok
 end
 
+local function apply_wheels(index, wheels)
+  if physics == nil or physics.setWheelAngularVelocity == nil or wheels == nil then return end
+  for i = 0, 3 do
+    call(physics.setWheelAngularVelocity, index, i, wheels[i + 1] or 0)
+  end
+end
+
+local function apply_brake(index, brake)
+  if ac.overrideCarControls == nil then return end
+  local ok, controls = pcall(ac.overrideCarControls, index)
+  if not ok or controls == nil then return end
+  controls.brake = brake or 0
+  controls.gas = 0
+  controls.handbrake = 0
+  controls.clutch = 1
+  controls.steer = math.huge
+end
+
 local function park_lead()
   if physics == nil then return end
   call(physics.disableCarCollisions, 1, true, false)
   call(physics.setAILevel, 1, 0)
+  call(physics.setAINoInput, 1, true, false)
   call(physics.setCarVelocity, 1, vec3(0, 0, 0))
   call(physics.setCarPosition, 1, vec3(0, -500, 0), vec3(0, 0, 1))
+  apply_wheels(1, { 0, 0, 0, 0 })
+  apply_brake(1, 0)
 end
 
 local function show_lead(pose)
   if physics == nil or pose == nil then return end
   call(physics.disableCarCollisions, 1, false, false)
   call(physics.setAILevel, 1, 0)
+  call(physics.setAINoInput, 1, true, false)
   move_car(1, pose, pose.vel)
+  apply_wheels(1, pose.wheels)
+  apply_brake(1, pose.brake)
 end
 
 local function teleport_player()
