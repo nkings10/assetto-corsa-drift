@@ -17,6 +17,8 @@ local logic = dofile(app_file('logic.lua'))
 local state = logic.create()
 local deck_seq = 0
 local deck = nil
+local visual = nil
+local visual_worker = false
 
 local ACTIONS = {
   [1] = logic.RECORD,
@@ -55,9 +57,6 @@ local buttons = {
 local function vec3_of(v)
   return vec3(v.x, v.y, v.z)
 end
-
--- setWheelAngularVelocity uses bit flags (FL=4, FR=8, RL=16, RR=32), not 0..3 indices.
-local WHEEL_BIT = { 4, 8, 16, 32 }
 
 local function read_wheels(car)
   local wheels = { 0, 0, 0, 0 }
@@ -142,44 +141,65 @@ local function speed_ms(vel)
   return math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
 end
 
-local function apply_wheels(index, wheels, vel)
-  if physics == nil or physics.setWheelAngularVelocity == nil then return end
+local function wheel_values(wheels, vel)
   local values = wheels or { 0, 0, 0, 0 }
   local spinning = math.abs(values[1]) + math.abs(values[2]) + math.abs(values[3]) + math.abs(values[4])
   if spinning < 0.01 then
     local omega = speed_ms(vel) / 0.33
-    values = { omega, omega, omega, omega }
+    return { omega, omega, omega, omega }
   end
-  for i = 1, 4 do
-    call(physics.setWheelAngularVelocity, index, WHEEL_BIT[i], values[i] or 0)
-  end
+  return values
 end
 
-local function apply_inputs(index, brake, steer)
+local function ensure_visual()
+  if visual ~= nil or ac.connect == nil or ac.StructItem == nil then return end
+  local ok, link = pcall(ac.connect, {
+    ac.StructItem.key('leadChase.visual.v1'),
+    active = ac.StructItem.int32(),
+    steer = ac.StructItem.float(),
+    w0 = ac.StructItem.float(),
+    w1 = ac.StructItem.float(),
+    w2 = ac.StructItem.float(),
+    w3 = ac.StructItem.float(),
+  })
+  if ok then visual = link end
+end
+
+local function start_visual_worker()
+  if visual_worker or physics == nil or physics.startPhysicsWorker == nil then return end
+  ensure_visual()
+  if visual == nil then return end
+  local ok = pcall(physics.startPhysicsWorker, 'lead_visual', 0, function() end)
+  if ok then visual_worker = true end
+end
+
+local function publish_visual(active, steer, wheels)
+  ensure_visual()
+  start_visual_worker()
+  if visual == nil then return end
+  visual.active = active and 1 or 0
+  visual.steer = steer or 0
+  local w = wheels or { 0, 0, 0, 0 }
+  visual.w0 = w[1] or 0
+  visual.w1 = w[2] or 0
+  visual.w2 = w[3] or 0
+  visual.w3 = w[4] or 0
+end
+
+local function apply_brake(index, brake)
   local brake_v = brake or 0
   if brake_v < 0.05 then brake_v = 0 end
-  local steer_v = steer or 0
-  if physics ~= nil and physics.overrideSteering ~= nil then
-    call(physics.overrideSteering, index, steer_v)
-  end
   if ac.overrideCarControls == nil then return end
   local ok, controls = pcall(ac.overrideCarControls, index)
   if not ok or controls == nil then return end
-  -- brake/gas use max(original, value); keep AI quiet so 0 can turn lights off.
+  -- CSP 0.3+: replace pedals instead of max(original, value) so lights can turn off.
+  if controls.combineAxis ~= nil then controls.combineAxis = false end
   controls.brake = brake_v
   controls.handbrake = 0
   controls.gas = 0
   controls.clutch = 1
-  controls.steer = steer_v
-end
-
-local function clear_inputs(index)
-  if physics ~= nil and physics.overrideSteering ~= nil then
-    local nan = math.nan
-    if nan == nil then nan = 0 / 0 end
-    call(physics.overrideSteering, index, nan)
-  end
-  apply_inputs(index, 0, 0)
+  -- Steering is applied by the physics worker; leave the control channel alone.
+  controls.steer = math.huge
 end
 
 local function park_lead()
@@ -189,8 +209,13 @@ local function park_lead()
   call(physics.setAINoInput, 1, true, false)
   call(physics.setCarVelocity, 1, vec3(0, 0, 0))
   call(physics.setCarPosition, 1, vec3(0, -500, 0), vec3(0, 0, 1))
-  apply_wheels(1, { 0, 0, 0, 0 }, { x = 0, y = 0, z = 0 })
-  clear_inputs(1)
+  publish_visual(false, 0, { 0, 0, 0, 0 })
+  apply_brake(1, 0)
+  if physics.overrideSteering ~= nil then
+    local nan = math.nan
+    if nan == nil then nan = 0 / 0 end
+    call(physics.overrideSteering, 1, nan)
+  end
 end
 
 local function show_lead(pose)
@@ -199,8 +224,8 @@ local function show_lead(pose)
   call(physics.setAILevel, 1, 0)
   call(physics.setAINoInput, 1, true, false)
   move_car(1, pose, pose.vel)
-  apply_wheels(1, pose.wheels, pose.vel)
-  apply_inputs(1, pose.brake, pose.steer)
+  publish_visual(true, pose.steer, wheel_values(pose.wheels, pose.vel))
+  apply_brake(1, pose.brake)
 end
 
 local function teleport_player()
