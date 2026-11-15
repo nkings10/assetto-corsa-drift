@@ -250,6 +250,12 @@ function script.update(dt)
   end
 
   local pose = logic.lead_pose(state, dt)
+  if state.pulse == 'teleport' then
+    state.pulse = nil
+    if state.spot ~= nil and can_move() then
+      teleport_player()
+    end
+  end
   if pose == nil then
     ghost.hide()
   else

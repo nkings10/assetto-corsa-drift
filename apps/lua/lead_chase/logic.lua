@@ -278,9 +278,10 @@ function M.lead_pose(state, dt)
   end
   if last.t - state.play_t <= 0.0001 then
     state.playing = false
-    state.play_t = last.t
-    state.notice = 'Lead finished'
-    return hold_pose(last), 'hold'
+    state.play_t = 0
+    state.pulse = 'teleport'
+    state.notice = 'Lead ready'
+    return hold_pose(first), 'hold'
   end
   local t = state.play_t
   local b = samples[1]
