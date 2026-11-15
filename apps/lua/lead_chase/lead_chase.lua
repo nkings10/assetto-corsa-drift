@@ -92,8 +92,10 @@ end
 local function move_car(index, pose, speed)
   if physics == nil or pose == nil then return false end
   local vel = speed or pose.vel
+  -- setCarPosition's dir is opposite car.look; pass the negated forward vector.
+  local dir = vec3_of(pose.dir)
   call(physics.setCarVelocity, index, vec3_of(vel))
-  local ok = call(physics.setCarPosition, index, vec3_of(pose.pos), vec3_of(pose.dir))
+  local ok = call(physics.setCarPosition, index, vec3_of(pose.pos), -dir)
   call(physics.setCarVelocity, index, vec3_of(vel))
   return ok
 end
