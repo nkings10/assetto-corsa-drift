@@ -164,6 +164,19 @@ do
   )
 end
 
+local smoke = dofile('apps/lua/solo_tandems/smoke.lua')
+
+do
+  local pos = { x = 10, y = 1, z = 20 }
+  local look = { x = 0, y = 0, z = 1 }
+  local side = { x = 1, y = 0, z = 0 }
+  local lx, ly, lz = smoke.contact(pos, look, side, nil, 1)
+  local rx, ry, rz = smoke.contact(pos, look, side, nil, -1)
+  check('missing wheels keep the fixed rear offset', math.abs(lx - 10.72) < 1e-9 and math.abs(lz - 18.65) < 1e-9 and math.abs(rx - 9.28) < 1e-9 and math.abs(ry - ly) < 1e-9)
+  local wx, wy, wz = smoke.contact(pos, look, side, { x = 4, y = 0.8, z = 7 }, 1)
+  check('a found wheel is used for the smoke', math.abs(wx - 4) < 1e-9 and math.abs(wy - (0.8 - smoke.radius())) < 1e-9 and math.abs(wz - 7) < 1e-9)
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
