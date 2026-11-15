@@ -401,17 +401,23 @@ local function set_running_lights(on)
   end
 end
 
-local function set_brake_visual(on, pose, look, up, side, pos)
+local function set_brake_visual(on, look, up, side, pos)
   ensure_lights()
   if on ~= brake_on then
     brake_on = on
-    set_emissive(brake_meshes, on, 50, 12.5)
+    -- Prefer dedicated brake meshes; fall back to taillight meshes only while braking.
+    local meshes = brake_meshes or tail_meshes
+    set_emissive(meshes, on, 55, 14)
+    if not on and brake_meshes ~= nil and tail_meshes ~= nil and brake_meshes ~= tail_meshes then
+      set_emissive(tail_meshes, false, 0, 0)
+    end
   end
   if not on then
     hide_light(brake_l)
     hide_light(brake_r)
     return
   end
+  if look == nil or pos == nil then return end
   local rear = pos - look * 2.0 + up * 0.5
   local dir = (-look - up * 0.1):normalize()
   if brake_l then
@@ -421,26 +427,6 @@ local function set_brake_visual(on, pose, look, up, side, pos)
   if brake_r then
     brake_r.position = rear - side * 0.55
     brake_r.direction = dir
-  end
-end
-
-local function update_head_tail_lights(pose, look, up, side, pos)
-  ensure_lights()
-  if not lights_on then return end
-  local front = pos + look * 1.8 + up * 0.4
-  local dir_f = (look - up * 0.05):normalize()
-  if head_l then
-    head_l.position = front + side * 0.55
-    head_l.direction = dir_f
-  end
-  if head_r then
-    head_r.position = front - side * 0.55
-    head_r.direction = dir_f
-  end
-  if tail_light then
-    local rear = pos - look * 2.0 + up * 0.45
-    tail_light.position = rear
-    tail_light.direction = (-look - up * 0.05):normalize()
   end
 end
 
@@ -771,6 +757,11 @@ function M.ensure(car_id)
   end)
   find_parts(node)
   find_meshes(node)
+  lights_on = false
+  brake_on = false
+  set_emissive(head_meshes, false, 0, 0)
+  set_emissive(tail_meshes, false, 0, 0)
+  set_emissive(brake_meshes, false, 0, 0)
   gfx_y = 0
   if ac.getCar ~= nil then
     local ok_car, car = pcall(ac.getCar, 0)
@@ -794,8 +785,8 @@ function M.hide()
       if node.clearMotion then node:clearMotion() end
     end)
   end
-  set_brake_visual(false, nil, nil, nil, nil, nil)
   set_running_lights(false)
+  set_brake_visual(false, nil, nil, nil, nil)
   stop_sound()
   spin[1], spin[2], spin[3], spin[4] = 0, 0, 0, 0
   steer_smooth = 0
@@ -863,9 +854,11 @@ function M.show(pose, dt)
   end
 
   update_wipers(dt)
-  set_running_lights(true)
-  set_brake_visual((pose.brake or 0) > 0.05, pose, look, up, side, pos)
-  update_head_tail_lights(pose, look, up, side, pos)
+  -- Head/tail stay off unless we add a lights toggle later; only brake glow when braking.
+  if lights_on then
+    set_running_lights(false)
+  end
+  set_brake_visual((pose.brake or 0) > 0.08, look, up, side, pos)
   update_smoke(pose, look, side, pos, dt)
   update_wetness()
   update_sound(pose, look, pos)
@@ -873,19 +866,11 @@ end
 
 function M.draw_glows()
   if not ready or was_hidden or render == nil or render.mesh == nil then return end
-  if lights_on then
-    if head_meshes ~= nil then
-      glow_head.meshes = head_meshes
-      pcall(render.mesh, glow_head)
+  if brake_on then
+    glow_brake.meshes = brake_meshes or tail_meshes
+    if glow_brake.meshes ~= nil then
+      pcall(render.mesh, glow_brake)
     end
-    if tail_meshes ~= nil then
-      glow_tail.meshes = tail_meshes
-      pcall(render.mesh, glow_tail)
-    end
-  end
-  if brake_on and brake_meshes ~= nil then
-    glow_brake.meshes = brake_meshes
-    pcall(render.mesh, glow_brake)
   end
 end
 
