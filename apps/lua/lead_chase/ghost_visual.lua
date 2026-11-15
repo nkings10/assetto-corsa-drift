@@ -1,27 +1,87 @@
--- Visual lead: KN5 in the scene with animated wheels, brake glow, and light smoke.
--- No physics car — avoids setCarPosition wiping wheel/light state.
+-- Visual lead: KN5 ghost with wheels, discs, steer wheel, lights, smoke, wipers, ground snap, wetness, sound.
 
 local M = {}
 
 local node = nil
+local all_meshes = nil
 local ready = false
 local loaded_id = nil
+local car_folder = nil
 local status = 'idle'
+local was_hidden = true
+local ground_offset = 0.33
+local last_y = nil
+local ground_bias = 0
+local raycast_ok = nil
 
 local wheel_mat = { nil, nil, nil, nil }
 local tyre_mat = { nil, nil, nil, nil }
+local disc_mat = { nil, nil, nil, nil }
 local wheel_orig = { nil, nil, nil, nil }
 local tyre_orig = { nil, nil, nil, nil }
+local disc_orig = { nil, nil, nil, nil }
 local spin = { 0, 0, 0, 0 }
 local steer_smooth = 0
 
-local brake_meshes = nil
-local brake_on = false
-local light_l = nil
-local light_r = nil
+local steer_mat = nil
+local steer_orig = nil
 
-local smoke = nil
-local smoke_t = 0
+local wiper_nodes = {}
+local wiper_ksanim = nil
+local wiper_t = 0
+
+local brake_meshes = nil
+local head_meshes = nil
+local tail_meshes = nil
+local exterior_meshes = nil
+local tyre_meshes = nil
+local brake_on = false
+local lights_on = false
+local wet_applied = false
+local last_wet = -1
+
+local brake_l, brake_r = nil, nil
+local head_l, head_r, tail_light = nil, nil, nil
+
+local smoke_main, smoke_heavy, smoke_push = nil, nil, nil
+local smoke_clock = 0
+
+local sound = nil
+local sound_bank = nil
+local sound_id = nil
+local smooth_rpm = 900
+local smooth_gas = 0
+
+local glow_brake = {
+  meshes = nil,
+  values = { gGlowColor = rgbm(1.5, 0.05, 0.02, 1) },
+  cacheKey = 'leadChaseBrkGlow',
+  defines = [[
+    float4 main(PS_IN pin) {
+      return float4(gGlowColor.rgb, 1);
+    }
+  ]],
+}
+local glow_head = {
+  meshes = nil,
+  values = { gGlowColor = rgbm(1.5, 1.5, 1.35, 1) },
+  cacheKey = 'leadChaseHLGlow',
+  defines = [[
+    float4 main(PS_IN pin) {
+      return float4(gGlowColor.rgb, 1);
+    }
+  ]],
+}
+local glow_tail = {
+  meshes = nil,
+  values = { gGlowColor = rgbm(0.6, 0.01, 0.01, 1) },
+  cacheKey = 'leadChaseTLGlow',
+  defines = [[
+    float4 main(PS_IN pin) {
+      return float4(gGlowColor.rgb, 1);
+    }
+  ]],
+}
 
 local function v3(t, fallback)
   if t == nil then return fallback or vec3(0, 0, 0) end
@@ -31,6 +91,12 @@ end
 local function speed_ms(vel)
   if vel == nil then return 0 end
   return math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
+end
+
+local function clamp(v, a, b)
+  if v < a then return a end
+  if v > b then return b end
+  return v
 end
 
 local function find_largest_kn5(folder)
@@ -57,7 +123,7 @@ end
 
 local function kn5_candidates(car_id)
   local cars = ac.getFolder(ac.FolderID.ContentCars)
-  if type(cars) ~= 'string' or cars == '' then return {} end
+  if type(cars) ~= 'string' or cars == '' then return {}, nil end
   local folder = cars .. '/' .. car_id
   local names = { car_id .. '.kn5' }
   local base = car_id:match('_([^_]+_[^_]+_[^_]+)$')
@@ -67,8 +133,7 @@ local function kn5_candidates(car_id)
   names[#names + 1] = 'body.kn5'
   local largest = find_largest_kn5(folder)
   if largest then names[#names + 1] = largest end
-  local paths = {}
-  local seen = {}
+  local paths, seen = {}, {}
   for i = 1, #names do
     local path = folder .. '/' .. names[i]
     if not seen[path] then
@@ -78,7 +143,7 @@ local function kn5_candidates(car_id)
       end
     end
   end
-  return paths
+  return paths, folder
 end
 
 local function cache_matrix(root, names)
@@ -93,14 +158,14 @@ local function cache_matrix(root, names)
       if mok and mat ~= nil then
         local orig = mat4x4()
         orig:set(mat)
-        return mat, orig
+        return mat, orig, ref
       end
     end
   end
-  return nil, nil
+  return nil, nil, nil
 end
 
-local function find_wheels(root)
+local function find_parts(root)
   local wheel_names = {
     { 'WHEEL_LF', 'wheel_lf' },
     { 'WHEEL_RF', 'wheel_rf' },
@@ -113,58 +178,95 @@ local function find_wheels(root)
     { 'TYRE_LR', 'tyre_lr', 'TIRE_LR', 'tire_lr' },
     { 'TYRE_RR', 'tyre_rr', 'TIRE_RR', 'tire_rr' },
   }
+  local disc_names = {
+    { 'BRAKE_DISC_LF', 'DISC_LF', 'disk_lf', 'BRAKE_DISC_FL', 'DISC_FL' },
+    { 'BRAKE_DISC_RF', 'DISC_RF', 'disk_rf', 'BRAKE_DISC_FR', 'DISC_FR' },
+    { 'BRAKE_DISC_LR', 'DISC_LR', 'disk_lr', 'BRAKE_DISC_RL', 'DISC_RL' },
+    { 'BRAKE_DISC_RR', 'DISC_RR', 'disk_rr', 'BRAKE_DISC_RR' },
+  }
   for i = 1, 4 do
     wheel_mat[i], wheel_orig[i] = cache_matrix(root, wheel_names[i])
     tyre_mat[i], tyre_orig[i] = cache_matrix(root, tyre_names[i])
+    disc_mat[i], disc_orig[i] = cache_matrix(root, disc_names[i])
   end
-end
+  steer_mat, steer_orig = cache_matrix(root, {
+    'STEER_HR', 'STEER', 'steer_hr', 'steer', 'Steer_HR', 'Steer',
+  })
 
-local function find_brake_meshes(root)
-  brake_meshes = nil
-  local patterns = {
-    '{ ?BRAKE? , ?brake? , actsAsBrakeLights:yes }',
-    '{ ?LIGHT_BRAKE? , ?light_brake? }',
-    '{ ?REAR_LIGHT? , ?rear_light? }',
-  }
-  for i = 1, #patterns do
-    local ok, meshes = pcall(function()
-      return root:findMeshes(patterns[i])
-    end)
-    if ok and meshes ~= nil and #meshes > 0 then
-      pcall(function()
-        meshes:ensureUniqueMaterials()
-      end)
-      brake_meshes = meshes
-      return
+  wiper_nodes = {}
+  wiper_ksanim = nil
+  local wiper_names = { 'WIPER_LEFT', 'WIPER_RIGHT', 'WIPER_L', 'WIPER_R', 'Wiper_L', 'Wiper_R', 'wiper_l', 'wiper_r' }
+  for i = 1, #wiper_names do
+    local mat, orig = cache_matrix(root, { wiper_names[i] })
+    if mat and orig then
+      wiper_nodes[#wiper_nodes + 1] = { mat = mat, orig = orig }
+    end
+  end
+  if car_folder ~= nil and io ~= nil and io.dirExists ~= nil then
+    local anim_dir = car_folder .. '/animations'
+    if io.dirExists(anim_dir) and io.scanDir ~= nil then
+      local files = io.scanDir(anim_dir, '*.ksanim')
+      if files then
+        for i = 1, #files do
+          local lower = files[i]:lower()
+          if lower:find('wiper', 1, true) then
+            wiper_ksanim = anim_dir .. '/' .. files[i]
+            break
+          end
+        end
+      end
     end
   end
 end
 
-local function ensure_lights()
-  if light_l ~= nil or ac.LightSource == nil then return end
-  local ok1, l = pcall(ac.LightSource, ac.LightType.Regular)
-  local ok2, r = pcall(ac.LightSource, ac.LightType.Regular)
-  if ok1 and l ~= nil then
-    l.color = rgb(40, 0, 0)
-    l.range = 5
-    l.spot = 90
-    l.spotSharpness = 0.2
-    l.shadows = false
-    l.position = vec3(0, -1000, 0)
-    light_l = l
+local function find_meshes(root)
+  local function grab(patterns)
+    for i = 1, #patterns do
+      local ok, meshes = pcall(function()
+        return root:findMeshes(patterns[i])
+      end)
+      if ok and meshes ~= nil and #meshes > 0 then
+        pcall(function()
+          meshes:ensureUniqueMaterials()
+        end)
+        return meshes
+      end
+    end
+    return nil
   end
-  if ok2 and r ~= nil then
-    r.color = rgb(40, 0, 0)
-    r.range = 5
-    r.spot = 90
-    r.spotSharpness = 0.2
-    r.shadows = false
-    r.position = vec3(0, -1000, 0)
-    light_r = r
+  brake_meshes = grab({
+    '{ ?BRAKE? , ?brake? , actsAsBrakeLights:yes }',
+    '{ ?LIGHT_BRAKE? , ?light_brake? }',
+  })
+  head_meshes = grab({
+    '{ ?HEADLIGHT? , ?headlight? , ?HEAD_LIGHT? }',
+    '{ ?FRONT_LIGHT? , ?front_light? }',
+  })
+  tail_meshes = grab({
+    '{ ?TAILLIGHT? , ?taillight? , ?TAIL_LIGHT? }',
+    '{ ?REAR_LIGHT? , ?rear_light? }',
+  })
+  local ok_all, meshes = pcall(function()
+    return root:findMeshes('?')
+  end)
+  all_meshes = (ok_all and meshes) or nil
+  exterior_meshes = all_meshes
+  tyre_meshes = grab({ '{ ?TYRE? , ?tyre? , ?TIRE? , ?tire? }' })
+  glow_brake.meshes = brake_meshes
+  glow_head.meshes = head_meshes
+  glow_tail.meshes = tail_meshes
+  if render ~= nil and render.BlendMode ~= nil then
+    glow_brake.blendMode = render.BlendMode.BlendAdd
+    glow_head.blendMode = render.BlendMode.BlendAdd
+    glow_tail.blendMode = render.BlendMode.BlendAdd
+  end
+  if render ~= nil and render.DepthMode ~= nil then
+    glow_brake.depthMode = render.DepthMode.ReadOnly
+    glow_head.depthMode = render.DepthMode.ReadOnly
+    glow_tail.depthMode = render.DepthMode.ReadOnly
   end
 end
 
--- Apply Y steer then X spin onto a live matrix from its original basis (row1/2/3).
 local function apply_spin_steer(mat, orig, spin_rad, steer_rad)
   if mat == nil or orig == nil then return end
   local ox1, oy1, oz1 = orig.row1.x, orig.row1.y, orig.row1.z
@@ -195,86 +297,390 @@ local function copy_orig(mat, orig)
   mat.row3.x, mat.row3.y, mat.row3.z, mat.row3.w = orig.row3.x, orig.row3.y, orig.row3.z, orig.row3.w
 end
 
-local function set_brake_visual(on, pose)
-  ensure_lights()
-  if on and not brake_on then
-    brake_on = true
-    if brake_meshes ~= nil then
-      pcall(function()
-        brake_meshes:setMaterialProperty('ksEmissive', 50)
-        brake_meshes:setMaterialProperty('ksDiffuse', 0)
-        brake_meshes:setMaterialProperty('ksAmbient', 12.5)
-      end)
-    end
-  elseif not on and brake_on then
-    brake_on = false
-    if brake_meshes ~= nil then
-      pcall(function()
-        brake_meshes:setMaterialProperty('ksEmissive', 0)
-        brake_meshes:setMaterialProperty('ksDiffuse', 1)
-        brake_meshes:setMaterialProperty('ksAmbient', 0)
-      end)
-    end
-  end
-  if light_l == nil then return end
-  if not on or pose == nil then
-    light_l.position = vec3(0, -1000, 0)
-    if light_r then light_r.position = vec3(0, -1000, 0) end
+local function apply_steer_wheel(angle)
+  if steer_mat == nil or steer_orig == nil then return end
+  local orig = steer_orig
+  local m = steer_mat
+  local cos_a, sin_a = math.cos(angle), math.sin(angle)
+  local ox1, oy1, oz1 = orig.row1.x, orig.row1.y, orig.row1.z
+  local ox2, oy2, oz2 = orig.row2.x, orig.row2.y, orig.row2.z
+  m.row1.x = ox1 * cos_a + ox2 * sin_a
+  m.row1.y = oy1 * cos_a + oy2 * sin_a
+  m.row1.z = oz1 * cos_a + oz2 * sin_a
+  m.row2.x = -ox1 * sin_a + ox2 * cos_a
+  m.row2.y = -oy1 * sin_a + oy2 * cos_a
+  m.row2.z = -oz1 * sin_a + oz2 * cos_a
+  m.row3.x, m.row3.y, m.row3.z = orig.row3.x, orig.row3.y, orig.row3.z
+end
+
+local function update_wipers(dt)
+  wiper_t = wiper_t + dt * 1.2
+  local progress = math.abs(math.sin(wiper_t * math.pi))
+  if wiper_ksanim ~= nil and node ~= nil then
+    pcall(function()
+      node:setAnimation(wiper_ksanim, progress, true)
+    end)
     return
   end
-  local pos = v3(pose.pos)
-  local look = v3(pose.dir, vec3(0, 0, 1))
-  if look:length() > 0.001 then look:normalize() else look = vec3(0, 0, 1) end
-  local up = v3(pose.up, vec3(0, 1, 0))
-  if up:length() > 0.001 then up:normalize() else up = vec3(0, 1, 0) end
-  local side = vec3(look.z * up.y - look.y * up.z, look.x * up.z - look.z * up.x, look.y * up.x - look.x * up.y)
-  if side:length() < 0.001 then
-    side = vec3(look.z, 0, -look.x)
+  local angle = math.sin(wiper_t * math.pi * 2) * math.rad(55)
+  for i = 1, #wiper_nodes do
+    local w = wiper_nodes[i]
+    local orig, m = w.orig, w.mat
+    local cos_w, sin_w = math.cos(angle), math.sin(angle)
+    local ox1, oy1, oz1 = orig.row1.x, orig.row1.y, orig.row1.z
+    local ox2, oy2, oz2 = orig.row2.x, orig.row2.y, orig.row2.z
+    m.row1.x = ox1 * cos_w + ox2 * sin_w
+    m.row1.y = oy1 * cos_w + oy2 * sin_w
+    m.row1.z = oz1 * cos_w + oz2 * sin_w
+    m.row2.x = -ox1 * sin_w + ox2 * cos_w
+    m.row2.y = -oy1 * sin_w + oy2 * cos_w
+    m.row2.z = -oz1 * sin_w + oz2 * cos_w
+    m.row3.x, m.row3.y, m.row3.z = orig.row3.x, orig.row3.y, orig.row3.z
   end
-  if side:length() < 0.001 then side = vec3(1, 0, 0) else side:normalize() end
+end
+
+local function make_light(color, range, spot)
+  if ac.LightSource == nil then return nil end
+  local ok, light = pcall(ac.LightSource, ac.LightType.Regular)
+  if not ok or light == nil then return nil end
+  light.color = color
+  light.range = range
+  light.spot = spot
+  light.spotSharpness = 0.4
+  light.shadows = false
+  light.position = vec3(0, -1000, 0)
+  return light
+end
+
+local function ensure_lights()
+  if brake_l == nil then
+    brake_l = make_light(rgb(40, 0, 0), 5, 90)
+    brake_r = make_light(rgb(40, 0, 0), 5, 90)
+  end
+  if head_l == nil then
+    head_l = make_light(rgb(8, 8, 7), 60, 55)
+    head_r = make_light(rgb(8, 8, 7), 60, 55)
+    tail_light = make_light(rgb(4, 0, 0), 18, 110)
+  end
+end
+
+local function hide_light(light)
+  if light ~= nil then light.position = vec3(0, -1000, 0) end
+end
+
+local function set_emissive(meshes, on, intensity, ambient)
+  if meshes == nil then return end
+  if on then
+    pcall(function()
+      meshes:setMaterialProperty('ksEmissive', intensity)
+      meshes:setMaterialProperty('ksDiffuse', 0)
+      meshes:setMaterialProperty('ksAmbient', ambient or (intensity * 0.25))
+    end)
+  else
+    pcall(function()
+      meshes:setMaterialProperty('ksEmissive', 0)
+      meshes:setMaterialProperty('ksDiffuse', 1)
+      meshes:setMaterialProperty('ksAmbient', 0)
+    end)
+  end
+end
+
+local function set_running_lights(on)
+  if on == lights_on then return end
+  lights_on = on
+  ensure_lights()
+  set_emissive(head_meshes, on, 100, 30)
+  set_emissive(tail_meshes, on, 60, 15)
+  if not on then
+    hide_light(head_l)
+    hide_light(head_r)
+    hide_light(tail_light)
+  end
+end
+
+local function set_brake_visual(on, pose, look, up, side, pos)
+  ensure_lights()
+  if on ~= brake_on then
+    brake_on = on
+    set_emissive(brake_meshes, on, 50, 12.5)
+  end
+  if not on then
+    hide_light(brake_l)
+    hide_light(brake_r)
+    return
+  end
   local rear = pos - look * 2.0 + up * 0.5
   local dir = (-look - up * 0.1):normalize()
-  light_l.position = rear + side * 0.55
-  light_l.direction = dir
-  if light_r then
-    light_r.position = rear - side * 0.55
-    light_r.direction = dir
+  if brake_l then
+    brake_l.position = rear + side * 0.55
+    brake_l.direction = dir
+  end
+  if brake_r then
+    brake_r.position = rear - side * 0.55
+    brake_r.direction = dir
+  end
+end
+
+local function update_head_tail_lights(pose, look, up, side, pos)
+  ensure_lights()
+  if not lights_on then return end
+  local front = pos + look * 1.8 + up * 0.4
+  local dir_f = (look - up * 0.05):normalize()
+  if head_l then
+    head_l.position = front + side * 0.55
+    head_l.direction = dir_f
+  end
+  if head_r then
+    head_r.position = front - side * 0.55
+    head_r.direction = dir_f
+  end
+  if tail_light then
+    local rear = pos - look * 2.0 + up * 0.45
+    tail_light.position = rear
+    tail_light.direction = (-look - up * 0.05):normalize()
   end
 end
 
 local function ensure_smoke()
-  if smoke ~= nil or ac.Particles == nil or ac.Particles.Smoke == nil then return end
-  local ok, emitter = pcall(ac.Particles.Smoke, {
-    color = rgbm(0.85, 0.85, 0.85, 0.5),
-    size = 0.4,
-    life = 1.0,
-    temperature = 0.15,
+  if smoke_main ~= nil or ac.Particles == nil or ac.Particles.Smoke == nil then return end
+  local ok1, main = pcall(ac.Particles.Smoke, {
+    color = rgbm(1, 1, 1, 0.3),
+    colorConsistency = 0.3,
+    thickness = 0.5,
+    life = 5.0,
+    size = 0.15,
+    spreadK = 1.5,
+    growK = 2.0,
+    targetYVelocity = 0.05,
+    flags = ac.Particles.SmokeFlags and ac.Particles.SmokeFlags.FadeIn or nil,
   })
-  if ok then smoke = emitter end
+  local ok2, heavy = pcall(ac.Particles.Smoke, {
+    color = rgbm(1, 1, 1, 0.4),
+    colorConsistency = 0.35,
+    thickness = 0.6,
+    life = 6.0,
+    size = 0.2,
+    spreadK = 1.8,
+    growK = 2.5,
+    targetYVelocity = 0.08,
+    flags = ac.Particles.SmokeFlags and ac.Particles.SmokeFlags.FadeIn or nil,
+  })
+  if ok1 then smoke_main = main end
+  if ok2 then smoke_heavy = heavy end
+  if ac.Particles.Detractor ~= nil then
+    local ok3, push = pcall(ac.Particles.Detractor, { radius = 2.0, forceMultiplier = 0.6 })
+    if ok3 then smoke_push = push end
+  end
 end
 
-local function update_smoke(pose, dt)
+local function update_smoke(pose, look, side, pos, dt)
   ensure_smoke()
-  if smoke == nil or pose == nil then return end
-  local speed_kmh = speed_ms(pose.vel) * 3.6
-  local steer = math.abs(pose.steer or 0)
-  smoke_t = smoke_t + (dt or 0)
-  if speed_kmh < 25 or steer < 0.2 or smoke_t < 0.03 then return end
-  smoke_t = 0
-  local pos = v3(pose.pos)
-  local look = v3(pose.dir, vec3(0, 0, 1))
-  if look:length() > 0.001 then look:normalize() else look = vec3(0, 0, 1) end
-  local up = v3(pose.up, vec3(0, 1, 0))
-  if up:length() > 0.001 then up:normalize() else up = vec3(0, 1, 0) end
-  local side = vec3(look.z * up.y - look.y * up.z, look.x * up.z - look.z * up.x, look.y * up.x - look.x * up.y)
-  if side:length() < 0.001 then side = vec3(1, 0, 0) else side:normalize() end
+  if smoke_main == nil or pose == nil then return end
+  local drift = math.abs(pose.drift or 0)
+  local speed = pose.speed or (speed_ms(pose.vel) * 3.6)
+  if smoke_push ~= nil then
+    smoke_push.position = pos
+    if pose.vel then smoke_push.velocity = v3(pose.vel) end
+  end
+  local now = os.preciseClock and os.preciseClock() or smoke_clock + dt
+  if drift <= 5 or speed <= 12 or now - smoke_clock < 0.008 then
+    smoke_clock = math.max(smoke_clock, now - 1)
+    return
+  end
+  smoke_clock = now
+  local intensity = clamp((drift - 5) / 35, 0, 1) * clamp((speed - 12) / 68, 0, 1)
+  local wheel_base, track_half, wheel_r = 1.35, 0.72, 0.33
   local vel = v3(pose.vel)
-  for _, sign in ipairs({ -1, 1 }) do
-    local p = pos - look * 1.15 + side * (0.7 * sign) + up * 0.05
+  local kick = speed * 0.012 * intensity
+  local slip_sign = (pose.drift or 0) > 0 and -1 or 1
+  local corners = {
+    pos - look * wheel_base + side * track_half + vec3(0, 0.02, 0),
+    pos - look * wheel_base - side * track_half + vec3(0, 0.02, 0),
+  }
+  local amount = 0.8 + intensity * 3.5
+  for c = 1, 2 do
+    local contact = corners[c]
+    local center = contact + vec3(0, wheel_r, 0)
+    for _ = 1, 3 do
+      local angle = (math.random() - 0.5) * math.pi
+      local r = wheel_r * (0.7 + math.random() * 0.6)
+      local p = vec3(
+        center.x - look.x * math.cos(angle) * r + side.x * (math.random() - 0.5) * 0.4,
+        math.max(contact.y, center.y + math.sin(angle) * r),
+        center.z - look.z * math.cos(angle) * r + side.z * (math.random() - 0.5) * 0.4
+      )
+      local out = p - center
+      local olen = out:length() + 0.001
+      local force = 0.5 + intensity
+      local v = vec3(
+        vel.x * 0.35 - look.x * kick + side.x * slip_sign * speed * 0.006 + out.x / olen * force,
+        0.1 + math.random() * 0.2,
+        vel.z * 0.35 - look.z * kick + side.z * slip_sign * speed * 0.006 + out.z / olen * force
+      )
+      pcall(function()
+        smoke_main:emit(p, v, amount * (0.7 + math.random() * 0.6))
+      end)
+    end
+    if intensity > 0.3 and smoke_heavy ~= nil then
+      local heavy = (intensity - 0.3) * 4
+      for _ = 1, 2 do
+        local p = center + side * ((math.random() - 0.5) * 0.5) - look * ((math.random() - 0.5) * 0.4)
+        p.y = math.max(contact.y, p.y)
+        local v = vel * 0.45 - look * (kick * 1.3) + side * (slip_sign * speed * 0.01)
+        v.y = 0.15 + math.random() * 0.25
+        pcall(function()
+          smoke_heavy:emit(p, v, heavy)
+        end)
+      end
+    end
+  end
+end
+
+local function get_ground_y(world_pos)
+  if raycast_ok == false or render == nil or render.createRay == nil then return nil end
+  local from = vec3(world_pos.x, world_pos.y + 5, world_pos.z)
+  local dir = vec3(0, -1, 0)
+  local ok, dist = pcall(function()
+    local ray = render.createRay(from, dir, 20)
+    return ray:track()
+  end)
+  if ok and dist ~= nil and dist >= 0 then
+    raycast_ok = true
+    return from.y - dist
+  end
+  local ok2, dist2 = pcall(function()
+    local ray = render.createRay(from, dir, 20)
+    return ray:physics(vec3(), vec3())
+  end)
+  if ok2 and dist2 ~= nil and dist2 >= 0 then
+    raycast_ok = true
+    return from.y - dist2
+  end
+  if raycast_ok == nil then raycast_ok = false end
+  return nil
+end
+
+local function snap_y(recorded_y, world_xz, dt, speed_kmh)
+  local ground = get_ground_y(vec3(world_xz.x, recorded_y, world_xz.z))
+  local target = recorded_y
+  if ground ~= nil then
+    local snapped = ground + ground_offset
+    local diff = snapped - recorded_y
+    ground_bias = ground_bias + (diff - ground_bias) * math.min(1, dt * 4)
+    if math.abs(diff) < 0.15 then
+      target = recorded_y
+    else
+      target = recorded_y + ground_bias
+    end
+  end
+  if was_hidden or last_y == nil then
+    last_y = target
+    return target
+  end
+  local max_delta = 0.08 * math.max(1, (speed_kmh or 0) / 80)
+  local delta = clamp(target - last_y, -max_delta, max_delta)
+  local smooth = (delta < 0) and 12 or 8
+  last_y = last_y + delta * math.min(1, dt * smooth)
+  return last_y
+end
+
+local function update_wetness()
+  if all_meshes == nil or ac.getSim == nil then return end
+  local ok, sim = pcall(ac.getSim)
+  if not ok or sim == nil then return end
+  local wet = sim.rainWetness or 0
+  local q = math.floor(wet * 100 + 0.5) / 100
+  if q > 0.01 then
+    if q ~= last_wet then
+      last_wet = q
+      wet_applied = true
+      pcall(function()
+        if exterior_meshes then
+          exterior_meshes:setMaterialProperty('ksSpecularEXP', 20 + wet * 80)
+          exterior_meshes:setMaterialProperty('fresnelC', 0.04 + wet * 0.2)
+        end
+        if tyre_meshes then
+          tyre_meshes:setMaterialProperty('fresnelC', 0.02)
+        end
+      end)
+    end
+  elseif wet_applied then
+    wet_applied = false
+    last_wet = -1
     pcall(function()
-      smoke:emit(p, vel * 0.15 + side * (sign * 1.5), 0.4 + steer * 0.5)
+      if exterior_meshes then
+        exterior_meshes:setMaterialProperty('ksSpecularEXP', 50)
+        exterior_meshes:setMaterialProperty('fresnelC', 0.04)
+      end
     end)
   end
+end
+
+local function stop_sound()
+  if sound ~= nil then
+    pcall(function()
+      if sound.isValid and sound:isValid() then
+        sound:stop()
+        if sound.dispose then sound:dispose() end
+      end
+    end)
+    sound = nil
+  end
+  sound_bank = nil
+  sound_id = nil
+  smooth_rpm = 900
+  smooth_gas = 0
+end
+
+local function update_sound(pose, look, pos)
+  if pose == nil then
+    stop_sound()
+    return
+  end
+  local car_id = loaded_id
+  if car_id == nil then return end
+  if sound_id ~= car_id then
+    stop_sound()
+  end
+  if sound == nil then
+    sound_id = car_id
+    local sfx = ac.getFolder(ac.FolderID.ContentCars) .. '/' .. car_id .. '/sfx/'
+    pcall(function()
+      sound_bank = ac.loadSoundbank(sfx .. car_id .. '.bank', sfx .. 'GUIDs.txt')
+    end)
+    local names = {
+      'event:/cars/' .. car_id .. '/engine_ext',
+      'event:/cars/' .. car_id .. '/engine',
+      '/cars/' .. car_id .. '/engine_ext',
+      '/cars/' .. car_id .. '/engine',
+    }
+    for i = 1, #names do
+      local ok, snd = pcall(ac.AudioEvent, names[i], true)
+      if ok and snd ~= nil and (snd.isValid == nil or snd:isValid()) then
+        sound = snd
+        pcall(function()
+          sound.volume = 0.4
+          sound:setPosition(pos, look, nil, v3(pose.vel))
+          sound:start()
+        end)
+        break
+      end
+    end
+  end
+  if sound == nil then return end
+  pcall(function()
+    sound:setPosition(pos, look, nil, v3(pose.vel))
+    local rpm = pose.rpm or 900
+    local gas = pose.gas or 0
+    smooth_rpm = smooth_rpm + (rpm - smooth_rpm) * 0.15
+    smooth_gas = smooth_gas + (gas - smooth_gas) * 0.3
+    smooth_rpm = clamp(smooth_rpm, 800, 9000)
+    smooth_gas = clamp(smooth_gas, 0, 1)
+    sound:setParam('rpms', smooth_rpm)
+    sound:setParam('throttle', smooth_gas)
+    sound:setParam('gear', pose.gear or 3)
+    sound.volume = 0.25 + smooth_gas * 0.25
+  end)
 end
 
 function M.status()
@@ -295,13 +701,15 @@ function M.ensure(car_id)
   end
   ready = false
   loaded_id = car_id
+  stop_sound()
   if node ~= nil then
     pcall(function()
       node:setPosition(vec3(0, -1000, 0))
     end)
   end
   node = nil
-  local paths = kn5_candidates(car_id)
+  local paths, folder = kn5_candidates(car_id)
+  car_folder = folder
   if #paths == 0 then
     status = 'kn5 missing'
     return false
@@ -322,8 +730,7 @@ function M.ensure(car_id)
   pcall(function()
     node:setVirtualCarFlag(true)
   end)
-  local loaded = nil
-  local path = nil
+  local loaded, path = nil, nil
   for i = 1, #paths do
     path = paths[i]
     local ok_load, meshes = pcall(function()
@@ -344,10 +751,15 @@ function M.ensure(car_id)
   pcall(function()
     loaded:ensureUniqueMaterials()
   end)
-  find_wheels(node)
-  find_brake_meshes(node)
-  node:setPosition(vec3(0, -1000, 0))
+  find_parts(node)
+  find_meshes(node)
+  ground_offset = 0.33
+  pcall(function()
+    node:setPosition(vec3(0, -1000, 0))
+    if node.clearMotion then node:clearMotion() end
+  end)
   ready = true
+  was_hidden = true
   status = 'ok ' .. tostring(path:match('[^/\\]+$') or path)
   return true
 end
@@ -356,11 +768,17 @@ function M.hide()
   if node ~= nil then
     pcall(function()
       node:setPosition(vec3(0, -1000, 0))
+      if node.clearMotion then node:clearMotion() end
     end)
   end
-  set_brake_visual(false, nil)
+  set_brake_visual(false, nil, nil, nil, nil, nil)
+  set_running_lights(false)
+  stop_sound()
   spin[1], spin[2], spin[3], spin[4] = 0, 0, 0, 0
   steer_smooth = 0
+  last_y = nil
+  ground_bias = 0
+  was_hidden = true
 end
 
 function M.show(pose, dt)
@@ -372,25 +790,39 @@ function M.show(pose, dt)
   if dt > 0.1 then dt = 0.1 end
   if dt < 0 then dt = 0 end
 
-  local pos = v3(pose.pos)
   local look = v3(pose.dir, vec3(0, 0, 1))
   if look:length() > 0.001 then look:normalize() else look = vec3(0, 0, 1) end
   local up = v3(pose.up, vec3(0, 1, 0))
   if up:length() > 0.001 then up:normalize() else up = vec3(0, 1, 0) end
+  local side = v3(pose.side)
+  if side:length() < 0.001 then
+    side = vec3(look.z * up.y - look.y * up.z, look.x * up.z - look.z * up.x, look.y * up.x - look.x * up.y)
+  end
+  if side:length() < 0.001 then side = vec3(1, 0, 0) else side:normalize() end
+
+  local raw = v3(pose.pos)
+  local speed = pose.speed or (speed_ms(pose.vel) * 3.6)
+  local y = snap_y(raw.y, raw, dt, speed)
+  local pos = vec3(raw.x, y, raw.z)
 
   node:setPosition(pos)
   node:setOrientation(look, up)
+  if was_hidden then
+    pcall(function()
+      if node.clearMotion then node:clearMotion() end
+    end)
+    was_hidden = false
+  end
 
   local target_steer = (pose.steer or 0) * math.rad(32)
   steer_smooth = steer_smooth + (target_steer - steer_smooth) * math.min(1, dt * 10)
+  apply_steer_wheel((pose.steer or 0) * math.rad(450))
 
   local spd = speed_ms(pose.vel)
   local radius = 0.33
   for i = 1, 4 do
     local omega = pose.wheels and pose.wheels[i] or 0
-    if math.abs(omega) < 0.01 then
-      omega = spd / radius
-    end
+    if math.abs(omega) < 0.01 then omega = spd / radius end
     if spd < 0.3 then omega = 0 end
     spin[i] = (spin[i] + omega * dt) % 6.283185307179586
     if spd < 0.3 then spin[i] = 0 end
@@ -402,10 +834,36 @@ function M.show(pose, dt)
     elseif wheel_mat[i] and wheel_orig[i] then
       apply_spin_steer(wheel_mat[i], wheel_orig[i], spin[i], steer)
     end
+    if disc_mat[i] and disc_orig[i] then
+      apply_spin_steer(disc_mat[i], disc_orig[i], spin[i], steer)
+    end
   end
 
-  set_brake_visual((pose.brake or 0) > 0.05, pose)
-  update_smoke(pose, dt)
+  update_wipers(dt)
+  set_running_lights(true)
+  set_brake_visual((pose.brake or 0) > 0.05, pose, look, up, side, pos)
+  update_head_tail_lights(pose, look, up, side, pos)
+  update_smoke(pose, look, side, pos, dt)
+  update_wetness()
+  update_sound(pose, look, pos)
+end
+
+function M.draw_glows()
+  if not ready or was_hidden or render == nil or render.mesh == nil then return end
+  if lights_on then
+    if head_meshes ~= nil then
+      glow_head.meshes = head_meshes
+      pcall(render.mesh, glow_head)
+    end
+    if tail_meshes ~= nil then
+      glow_tail.meshes = tail_meshes
+      pcall(render.mesh, glow_tail)
+    end
+  end
+  if brake_on and brake_meshes ~= nil then
+    glow_brake.meshes = brake_meshes
+    pcall(render.mesh, glow_brake)
+  end
 end
 
 return M

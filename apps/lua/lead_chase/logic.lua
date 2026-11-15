@@ -59,14 +59,33 @@ local function copy_up(up)
   return normalize(up)
 end
 
+local function copy_side(side, dir, up)
+  if side ~= nil then return normalize(side) end
+  dir = dir or { x = 0, y = 0, z = 1 }
+  up = up or { x = 0, y = 1, z = 0 }
+  return normalize({
+    x = dir.z * up.y - dir.y * up.z,
+    y = dir.x * up.z - dir.z * up.x,
+    z = dir.y * up.x - dir.x * up.y,
+  })
+end
+
 local function pose_copy(pose)
+  local dir = normalize(pose.dir)
+  local up = copy_up(pose.up)
   return {
     pos = copy3(pose.pos),
-    dir = normalize(pose.dir),
-    up = copy_up(pose.up),
+    dir = dir,
+    up = up,
+    side = copy_side(pose.side, dir, up),
     vel = copy3(pose.vel or { x = 0, y = 0, z = 0 }),
     brake = pose.brake or 0,
     steer = pose.steer or 0,
+    gas = pose.gas or 0,
+    rpm = pose.rpm or 0,
+    gear = pose.gear or 0,
+    drift = pose.drift or 0,
+    speed = pose.speed or 0,
     wheels = copy_wheels(pose.wheels),
   }
 end
@@ -76,9 +95,15 @@ local function hold_pose(sample)
     pos = copy3(sample.pos),
     dir = copy3(sample.dir),
     up = copy_up(sample.up),
+    side = copy_side(sample.side, sample.dir, sample.up),
     vel = { x = 0, y = 0, z = 0 },
     brake = 0,
     steer = sample.steer or 0,
+    gas = 0,
+    rpm = math.min(sample.rpm or 900, 900),
+    gear = sample.gear or 0,
+    drift = 0,
+    speed = 0,
     wheels = { 0, 0, 0, 0 },
   }
 end
@@ -239,9 +264,15 @@ function M.lead_pose(state, dt)
       pos = copy3(first.pos),
       dir = copy3(first.dir),
       up = copy_up(first.up),
+      side = copy_side(first.side, first.dir, first.up),
       vel = copy3(first.vel),
       brake = first.brake or 0,
       steer = first.steer or 0,
+      gas = first.gas or 0,
+      rpm = first.rpm or 0,
+      gear = first.gear or 0,
+      drift = first.drift or 0,
+      speed = first.speed or 0,
       wheels = copy_wheels(first.wheels),
     }, 'play'
   end
@@ -263,13 +294,25 @@ function M.lead_pose(state, dt)
   end
   local span = b.t - a.t
   local u = span > 0 and (t - a.t) / span or 0
+  local dir = normalize(lerp3(a.dir, b.dir, u))
+  local up = normalize(lerp3(a.up or { x = 0, y = 1, z = 0 }, b.up or { x = 0, y = 1, z = 0 }, u))
   return {
     pos = lerp3(a.pos, b.pos, u),
-    dir = normalize(lerp3(a.dir, b.dir, u)),
-    up = normalize(lerp3(a.up or { x = 0, y = 1, z = 0 }, b.up or { x = 0, y = 1, z = 0 }, u)),
+    dir = dir,
+    up = up,
+    side = normalize(lerp3(
+      a.side or copy_side(nil, a.dir, a.up),
+      b.side or copy_side(nil, b.dir, b.up),
+      u
+    )),
     vel = lerp3(a.vel, b.vel, u),
     brake = (a.brake or 0) + ((b.brake or 0) - (a.brake or 0)) * u,
     steer = (a.steer or 0) + ((b.steer or 0) - (a.steer or 0)) * u,
+    gas = (a.gas or 0) + ((b.gas or 0) - (a.gas or 0)) * u,
+    rpm = (a.rpm or 0) + ((b.rpm or 0) - (a.rpm or 0)) * u,
+    gear = a.gear or 0,
+    drift = (a.drift or 0) + ((b.drift or 0) - (a.drift or 0)) * u,
+    speed = (a.speed or 0) + ((b.speed or 0) - (a.speed or 0)) * u,
     wheels = lerp_wheels(a.wheels, b.wheels, u),
   }, 'play'
 end

@@ -89,17 +89,42 @@ local function read_brake(car)
   return brake
 end
 
+local function read_drift(car, vel, look)
+  local speed = math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
+  if speed < 5 then return 0 end
+  local vx, vy, vz = vel.x / speed, vel.y / speed, vel.z / speed
+  local lx, ly, lz = look.x, look.y, look.z
+  local llen = math.sqrt(lx * lx + ly * ly + lz * lz)
+  if llen > 0.001 then lx, ly, lz = lx / llen, ly / llen, lz / llen end
+  local dot = vx * lx + vy * ly + vz * lz
+  if dot > 1 then dot = 1 elseif dot < -1 then dot = -1 end
+  local angle = math.deg(math.acos(dot))
+  local cy = vz * lx - vx * lz
+  if cy < 0 then angle = -angle end
+  return angle
+end
+
 local function read_pose(car)
   local vel = car.velocity or vec3(0, 0, 0)
   local dir = car.look or vec3(0, 0, 1)
   local up = car.up or vec3(0, 1, 0)
+  local side = car.side
+  if side == nil then
+    side = vec3(dir.z * up.y - dir.y * up.z, dir.x * up.z - dir.z * up.x, dir.y * up.x - dir.x * up.y)
+  end
   return {
     pos = { x = car.position.x, y = car.position.y, z = car.position.z },
     dir = { x = dir.x, y = dir.y, z = dir.z },
     up = { x = up.x, y = up.y, z = up.z },
+    side = { x = side.x, y = side.y, z = side.z },
     vel = { x = vel.x, y = vel.y, z = vel.z },
     brake = read_brake(car),
     steer = read_steer(car),
+    gas = car.gas or 0,
+    rpm = car.rpm or 0,
+    gear = car.gear or 0,
+    drift = read_drift(car, vel, dir),
+    speed = car.speedKmh or math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) * 3.6,
     wheels = read_wheels(car),
   }
 end
@@ -232,6 +257,10 @@ function script.update(dt)
       ghost.show(pose, dt)
     end
   end
+end
+
+function script.draw3D()
+  ghost.draw_glows()
 end
 
 function script.windowMain(dt)
