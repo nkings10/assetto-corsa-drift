@@ -1,4 +1,4 @@
-local logic = dofile('apps/lua/lead_chase/logic.lua')
+local logic = dofile('apps/lua/solo_tandem/logic.lua')
 
 local failures = 0
 

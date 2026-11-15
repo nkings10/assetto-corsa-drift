@@ -2,11 +2,11 @@
 -- Custom Shaders Patch 0.2.11. No second physics car — wheels/lights animate on the ghost.
 
 local function app_file(name)
-  local folder = 'apps/lua/lead_chase/'
+  local folder = 'apps/lua/solo_tandem/'
   if ac.getFolder and ac.FolderID and ac.FolderID.ACApps then
     local apps = ac.getFolder(ac.FolderID.ACApps)
     if type(apps) == 'string' and apps ~= '' then
-      folder = apps .. '/lua/lead_chase/'
+      folder = apps .. '/lua/solo_tandem/'
     end
   end
   return folder .. name
@@ -40,8 +40,8 @@ local function runs_folder()
     end
   end
   if type(docs) ~= 'string' or docs == '' then
-    docs = ac.getFolder and ac.getFolder(ac.FolderID.ACApps) or 'apps/lua/lead_chase'
-    run_folder_cached = docs .. '/lua/lead_chase/runs'
+    docs = ac.getFolder and ac.getFolder(ac.FolderID.ACApps) or 'apps/lua/solo_tandem'
+    run_folder_cached = docs .. '/lua/solo_tandem/runs'
   else
     run_folder_cached = docs .. '/lead_chase_runs'
   end
@@ -114,12 +114,12 @@ local function bind(id)
 end
 
 local buttons = {
-  { key = 'record', button = bind('Lead chase/Record') },
-  { key = 'appear', button = bind('Lead chase/Appear') },
-  { key = 'spot', button = bind('Lead chase/Chase spot') },
-  { key = 'teleport', button = bind('Lead chase/Teleport') },
-  { key = 'start', button = bind('Lead chase/Start') },
-  { key = 'clear', button = bind('Lead chase/Clear lead') },
+  { key = 'record', button = bind('Solo Tandem/Record') },
+  { key = 'appear', button = bind('Solo Tandem/Appear') },
+  { key = 'spot', button = bind('Solo Tandem/Chase spot') },
+  { key = 'teleport', button = bind('Solo Tandem/Teleport') },
+  { key = 'start', button = bind('Solo Tandem/Start') },
+  { key = 'clear', button = bind('Solo Tandem/Clear lead') },
 }
 
 local function vec3_of(v)
