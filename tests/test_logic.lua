@@ -253,6 +253,41 @@ do
   )
 end
 
+local wetness = dofile('apps/lua/solo_tandems/wetness.lua')
+
+local function material_read(meshes, index, prop)
+  local row = meshes[index]
+  if type(row) ~= 'table' then return nil end
+  return row[prop]
+end
+
+do
+  local saved = wetness.capture({
+    { ksSpecularEXP = 35, fresnelC = 0.12 },
+    { fresnelC = 0.4 },
+    { ksSpecularEXP = 'missing', fresnelC = false },
+  }, {
+    { fresnelC = 0.7 },
+  }, material_read)
+  local writes = wetness.restore_writes(saved)
+  local function has(group, index, prop, value)
+    for i = 1, #writes do
+      local item = writes[i]
+      if item.group == group and item.index == index and item.prop == prop and item.value == value then
+        return true
+      end
+    end
+    return false
+  end
+  check('dry paint restores the saved shine', has('body', 1, 'ksSpecularEXP', 35) and has('body', 1, 'fresnelC', 0.12))
+  check('dry paint keeps a mesh that only had fresnel', has('body', 2, 'fresnelC', 0.4) and not has('body', 2, 'ksSpecularEXP', 50))
+  check('dry tyres restore their own fresnel', has('tyre', 1, 'fresnelC', 0.7))
+  check('unreadable material values are skipped', #writes == 4)
+  local blank = wetness.capture({ {} }, { {} }, function() return nil end)
+  check('no readable materials means nothing to restore', #wetness.restore_writes(blank) == 0)
+  check('missing save means nothing to restore', #wetness.restore_writes(nil) == 0)
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
