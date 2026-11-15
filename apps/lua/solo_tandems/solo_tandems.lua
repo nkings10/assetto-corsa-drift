@@ -367,6 +367,11 @@ local function import_run()
     recorded_car_id = meta.carId
   end
   lead_visual.hide()
+  if not ensure_lead() then
+    state.notice = lead_visual.status()
+    return
+  end
+  lead_visual.hide()
   state.notice = 'Imported ' .. name
 end
 
@@ -429,10 +434,14 @@ function script.update(dt)
   local pose = logic.lead_position(state, dt)
   if pose == nil then
     lead_visual.hide()
-  else
-    if ensure_lead() then
-      lead_visual.show(pose, dt)
+  elseif ensure_lead() then
+    if lead_visual.is_model_notice(state.notice) then
+      state.notice = state.playing and 'Lead is running' or 'Lead is waiting'
     end
+    lead_visual.show(pose, dt)
+  else
+    lead_visual.hide()
+    state.notice = lead_visual.status()
   end
 end
 

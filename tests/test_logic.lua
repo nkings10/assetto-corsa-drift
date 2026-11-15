@@ -423,6 +423,29 @@ do
   check('a missing light reading is off', dark.samples[1].lights.head == 0 and dark.samples[1].lights.blink == 0)
 end
 
+local model_notice = dofile('apps/lua/solo_tandems/model_notice.lua')
+
+do
+  check(
+    'a missing car says it is not installed',
+    model_notice.message('not-installed', 'ae86') == 'Lead car is not installed: ae86'
+  )
+  check(
+    'a car with no model says so',
+    model_notice.message('no-model', 'ae86') == 'Lead car has no model: ae86'
+  )
+  check(
+    'a model that will not load says so',
+    model_notice.message('load-failed', 'ae86') == 'Could not load the lead car model: ae86'
+  )
+  check(
+    'the model notices are recognised',
+    model_notice.is_notice('Lead car is not installed: ae86')
+      and model_notice.is_notice('Could not place the lead car')
+      and not model_notice.is_notice('Lead is waiting')
+  )
+end
+
 local smoke = dofile('apps/lua/solo_tandems/smoke.lua')
 
 do

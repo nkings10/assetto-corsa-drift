@@ -13,6 +13,7 @@ local function sibling(name)
   return dofile(folder .. name)
 end
 
+local model_notice = sibling('model_notice.lua')
 local car_lights = sibling('car_lights.lua')
 local car_data = sibling('car_data.lua')
 local wetness = sibling('wetness.lua')
@@ -1136,6 +1137,10 @@ local function update_sound(pose, look, pos)
   end)
 end
 
+function M.is_model_notice(text)
+  return model_notice.is_notice(text)
+end
+
 function M.status()
   return status
 end
@@ -1156,7 +1161,7 @@ end
 
 function M.ensure(car_id)
   if car_id == nil or car_id == '' then
-    status = 'no car id'
+    status = model_notice.message('no-car', car_id)
     return false
   end
   if ready and loaded_id == car_id and node ~= nil then
@@ -1171,20 +1176,32 @@ function M.ensure(car_id)
   drop_node()
   local paths, folder = kn5_candidates(car_id)
   car_folder = folder
+  if folder == nil then
+    status = model_notice.message('no-cars-folder', car_id)
+    return false
+  end
+  local folder_exists = true
+  if io ~= nil and io.dirExists ~= nil then
+    folder_exists = io.dirExists(folder) == true
+  end
+  if not folder_exists then
+    status = model_notice.message('not-installed', car_id)
+    return false
+  end
   if #paths == 0 then
-    status = 'kn5 missing'
+    status = model_notice.message('no-model', car_id)
     return false
   end
   local ok_root, cars_root = pcall(ac.findNodes, 'carsRoot:yes')
   if not ok_root or cars_root == nil then
-    status = 'no carsRoot'
+    status = model_notice.message('place-failed', car_id)
     return false
   end
   local ok_node, created = pcall(function()
     return cars_root:createBoundingSphereNode('soloTandemsLead', 12)
   end)
   if not ok_node or created == nil then
-    status = 'node failed'
+    status = model_notice.message('place-failed', car_id)
     return false
   end
   node = created
@@ -1203,7 +1220,7 @@ function M.ensure(car_id)
     end
   end
   if loaded == nil then
-    status = 'load failed'
+    status = model_notice.message('load-failed', car_id)
     drop_node()
     return false
   end
