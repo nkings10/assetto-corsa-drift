@@ -1,6 +1,0 @@
-Lead chase
-
-Practice session with a second car for the lead ghost.
-Open the Lead chase app, record a run, place the lead, save a chase spot, teleport, and start.
-
-Extended physics is forced on. The second car matches the Laurel C33 for now.

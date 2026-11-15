@@ -18,7 +18,12 @@ local ghost = dofile(app_file('ghost_visual.lua'))
 local state = logic.create()
 local deck_seq = 0
 local deck = nil
-local ghost_car_id = nil
+local recorded_car_id = nil
+local ghost_override = nil
+local all_cars = nil
+local car_search = ''
+local car_options = nil
+local car_option_i = 1
 local run_name = 'run'
 local run_files = nil
 local run_pick = 1
@@ -240,10 +245,84 @@ local function teleport_player()
   call(physics.engageGear, 0, 0)
 end
 
+local function refresh_car_list()
+  all_cars = {}
+  if ac.getFolder == nil or ac.FolderID == nil or ac.FolderID.ContentCars == nil then return end
+  local folder = ac.getFolder(ac.FolderID.ContentCars)
+  if type(folder) ~= 'string' or folder == '' or io == nil or io.scanDir == nil then return end
+  local dirs = io.scanDir(folder, '*')
+  if dirs == nil then return end
+  for i = 1, #dirs do
+    local name = dirs[i]
+    if type(name) == 'string' and name ~= '' then
+      local path = folder .. '/' .. name
+      local is_dir = true
+      if io.dirExists ~= nil then
+        is_dir = io.dirExists(path) == true
+      end
+      if is_dir then
+        all_cars[#all_cars + 1] = name
+      end
+    end
+  end
+  table.sort(all_cars)
+end
+
+local function rebuild_car_options()
+  if all_cars == nil then refresh_car_list() end
+  car_options = {}
+  local recorded = recorded_car_id or player_car_id() or '?'
+  car_options[1] = { id = nil, label = 'Same as recorded (' .. tostring(recorded) .. ')' }
+  local q = tostring(car_search or ''):lower()
+  if all_cars ~= nil then
+    for i = 1, #all_cars do
+      local id = all_cars[i]
+      if q == '' or id:lower():find(q, 1, true) then
+        car_options[#car_options + 1] = { id = id, label = id }
+      end
+    end
+  end
+  if car_option_i < 1 then car_option_i = 1 end
+  if car_option_i > #car_options then car_option_i = #car_options end
+end
+
+local function sync_car_option_index()
+  if car_options == nil then rebuild_car_options() end
+  if ghost_override == nil or ghost_override == '' then
+    car_option_i = 1
+    return
+  end
+  for i = 2, #car_options do
+    if car_options[i].id == ghost_override then
+      car_option_i = i
+      return
+    end
+  end
+  car_option_i = 1
+end
+
+local function effective_ghost_id()
+  if ghost_override ~= nil and ghost_override ~= '' then
+    return ghost_override
+  end
+  return recorded_car_id or player_car_id()
+end
+
+local function apply_car_option()
+  if car_options == nil or car_options[car_option_i] == nil then return end
+  local picked = car_options[car_option_i]
+  local before = effective_ghost_id()
+  ghost_override = picked.id
+  local after = effective_ghost_id()
+  if after ~= nil and after ~= before and state.placed then
+    ghost.ensure(after)
+  end
+end
+
 local function ensure_ghost()
-  local id = ghost_car_id or player_car_id()
+  local id = effective_ghost_id()
   if id == nil then return false end
-  ghost_car_id = id
+  if recorded_car_id == nil then recorded_car_id = id end
   return ghost.ensure(id)
 end
 
@@ -265,7 +344,7 @@ local function export_run()
   local name = sanitize_name(run_name)
   local path = folder .. '/' .. name .. '.lead'
   local payload, err = logic.pack(state, {
-    carId = ghost_car_id or player_car_id() or '',
+    carId = recorded_car_id or player_car_id() or '',
     trackId = track_id(),
   })
   if payload == nil then
@@ -314,8 +393,10 @@ local function import_run()
     return
   end
   if meta.carId ~= nil and meta.carId ~= '' then
-    ghost_car_id = meta.carId
+    recorded_car_id = meta.carId
   end
+  ghost_override = nil
+  car_options = nil
   ghost.hide()
   state.notice = 'Imported ' .. name
 end
@@ -327,7 +408,9 @@ local function press(action)
     teleport_player()
   end
   if action == logic.RECORD and state.recording then
-    ghost_car_id = player_car_id()
+    recorded_car_id = player_car_id()
+    ghost_override = nil
+    car_options = nil
   end
   if action == logic.CLEAR or (action == logic.RECORD and state.recording) then
     ghost.hide()
@@ -401,8 +484,46 @@ function script.windowMain(dt)
   end
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off (teleport only)')
   ui.text('Ghost: ' .. tostring(ghost.status()))
-  if ghost_car_id ~= nil then
-    ui.text('Car: ' .. ghost_car_id)
+  ui.text('Ghost car: ' .. tostring(effective_ghost_id() or 'none'))
+  if recorded_car_id ~= nil then
+    ui.text('Recorded car: ' .. recorded_car_id)
+  end
+
+  ui.separator()
+  ui.text('Ghost model')
+  if ui.inputText ~= nil then
+    local ok, a, b = pcall(ui.inputText, 'Search cars', car_search)
+    if ok then
+      local next_search = car_search
+      if type(a) == 'string' then
+        next_search = a
+      elseif type(b) == 'string' then
+        next_search = b
+      end
+      if next_search ~= car_search then
+        car_search = next_search
+        rebuild_car_options()
+        sync_car_option_index()
+      end
+    end
+  end
+  if car_options == nil then
+    rebuild_car_options()
+    sync_car_option_index()
+  end
+  if car_options ~= nil and #car_options > 0 then
+    if ui.button('Car <') then
+      car_option_i = math.max(1, car_option_i - 1)
+      apply_car_option()
+    end
+    ui.sameLine(0, 8)
+    ui.text(tostring(car_options[car_option_i] and car_options[car_option_i].label or ''))
+    ui.sameLine(0, 8)
+    if ui.button('Car >') then
+      car_option_i = math.min(#car_options, car_option_i + 1)
+      apply_car_option()
+    end
+    ui.text(string.format('%d / %d', car_option_i, #car_options))
   end
 
   ui.separator()

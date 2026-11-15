@@ -1,0 +1,6 @@
+Solo Tandem
+
+One-car Practice with extended physics for lead chase.
+Open the Lead chase app, record a run (or import a .lead), pick the ghost car if you want, Appear, save a chase spot, Start.
+
+The lead is a visual ghost — no second physics car. Teleport needs extended physics (forced on here).
