@@ -56,6 +56,9 @@ local function vec3_of(v)
   return vec3(v.x, v.y, v.z)
 end
 
+-- setWheelAngularVelocity uses bit flags (FL=4, FR=8, RL=16, RR=32), not 0..3 indices.
+local WHEEL_BIT = { 4, 8, 16, 32 }
+
 local function read_wheels(car)
   local wheels = { 0, 0, 0, 0 }
   if car.wheels == nil then return wheels end
@@ -68,6 +71,25 @@ local function read_wheels(car)
   return wheels
 end
 
+local function read_steer(car)
+  local lock = car.steerLock
+  if lock == nil or lock < 0.001 then return 0 end
+  local steer = car.steer or 0
+  local n = steer / lock
+  if n > 1 then return 1 end
+  if n < -1 then return -1 end
+  return n
+end
+
+local function read_brake(car)
+  local brake = car.brake or 0
+  local hand = car.handbrake or 0
+  if hand > brake then brake = hand end
+  if brake < 0.05 then return 0 end
+  if brake > 1 then return 1 end
+  return brake
+end
+
 local function read_pose(car)
   local vel = car.velocity or vec3(0, 0, 0)
   local dir = car.look or vec3(0, 0, 1)
@@ -75,7 +97,8 @@ local function read_pose(car)
     pos = { x = car.position.x, y = car.position.y, z = car.position.z },
     dir = { x = dir.x, y = dir.y, z = dir.z },
     vel = { x = vel.x, y = vel.y, z = vel.z },
-    brake = car.brake or 0,
+    brake = read_brake(car),
+    steer = read_steer(car),
     wheels = read_wheels(car),
   }
 end
@@ -114,22 +137,49 @@ local function move_car(index, pose, speed)
   return ok
 end
 
-local function apply_wheels(index, wheels)
-  if physics == nil or physics.setWheelAngularVelocity == nil or wheels == nil then return end
-  for i = 0, 3 do
-    call(physics.setWheelAngularVelocity, index, i, wheels[i + 1] or 0)
+local function speed_ms(vel)
+  if vel == nil then return 0 end
+  return math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z)
+end
+
+local function apply_wheels(index, wheels, vel)
+  if physics == nil or physics.setWheelAngularVelocity == nil then return end
+  local values = wheels or { 0, 0, 0, 0 }
+  local spinning = math.abs(values[1]) + math.abs(values[2]) + math.abs(values[3]) + math.abs(values[4])
+  if spinning < 0.01 then
+    local omega = speed_ms(vel) / 0.33
+    values = { omega, omega, omega, omega }
+  end
+  for i = 1, 4 do
+    call(physics.setWheelAngularVelocity, index, WHEEL_BIT[i], values[i] or 0)
   end
 end
 
-local function apply_brake(index, brake)
+local function apply_inputs(index, brake, steer)
+  local brake_v = brake or 0
+  if brake_v < 0.05 then brake_v = 0 end
+  local steer_v = steer or 0
+  if physics ~= nil and physics.overrideSteering ~= nil then
+    call(physics.overrideSteering, index, steer_v)
+  end
   if ac.overrideCarControls == nil then return end
   local ok, controls = pcall(ac.overrideCarControls, index)
   if not ok or controls == nil then return end
-  controls.brake = brake or 0
-  controls.gas = 0
+  -- brake/gas use max(original, value); keep AI quiet so 0 can turn lights off.
+  controls.brake = brake_v
   controls.handbrake = 0
+  controls.gas = 0
   controls.clutch = 1
-  controls.steer = math.huge
+  controls.steer = steer_v
+end
+
+local function clear_inputs(index)
+  if physics ~= nil and physics.overrideSteering ~= nil then
+    local nan = math.nan
+    if nan == nil then nan = 0 / 0 end
+    call(physics.overrideSteering, index, nan)
+  end
+  apply_inputs(index, 0, 0)
 end
 
 local function park_lead()
@@ -139,8 +189,8 @@ local function park_lead()
   call(physics.setAINoInput, 1, true, false)
   call(physics.setCarVelocity, 1, vec3(0, 0, 0))
   call(physics.setCarPosition, 1, vec3(0, -500, 0), vec3(0, 0, 1))
-  apply_wheels(1, { 0, 0, 0, 0 })
-  apply_brake(1, 0)
+  apply_wheels(1, { 0, 0, 0, 0 }, { x = 0, y = 0, z = 0 })
+  clear_inputs(1)
 end
 
 local function show_lead(pose)
@@ -149,8 +199,8 @@ local function show_lead(pose)
   call(physics.setAILevel, 1, 0)
   call(physics.setAINoInput, 1, true, false)
   move_car(1, pose, pose.vel)
-  apply_wheels(1, pose.wheels)
-  apply_brake(1, pose.brake)
+  apply_wheels(1, pose.wheels, pose.vel)
+  apply_inputs(1, pose.brake, pose.steer)
 end
 
 local function teleport_player()

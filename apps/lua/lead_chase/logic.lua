@@ -60,6 +60,7 @@ local function pose_copy(pose)
     dir = normalize(pose.dir),
     vel = copy3(pose.vel or { x = 0, y = 0, z = 0 }),
     brake = pose.brake or 0,
+    steer = pose.steer or 0,
     wheels = copy_wheels(pose.wheels),
   }
 end
@@ -70,6 +71,7 @@ local function hold_pose(sample)
     dir = copy3(sample.dir),
     vel = { x = 0, y = 0, z = 0 },
     brake = 0,
+    steer = sample.steer or 0,
     wheels = { 0, 0, 0, 0 },
   }
 end
@@ -248,6 +250,7 @@ function M.lead_pose(state, dt)
       dir = copy3(first.dir),
       vel = copy3(first.vel),
       brake = first.brake or 0,
+      steer = first.steer or 0,
       wheels = copy_wheels(first.wheels),
     }, 'play'
   end
@@ -274,6 +277,7 @@ function M.lead_pose(state, dt)
     dir = normalize(lerp3(a.dir, b.dir, u)),
     vel = lerp3(a.vel, b.vel, u),
     brake = (a.brake or 0) + ((b.brake or 0) - (a.brake or 0)) * u,
+    steer = (a.steer or 0) + ((b.steer or 0) - (a.steer or 0)) * u,
     wheels = lerp_wheels(a.wheels, b.wheels, u),
   }, 'play'
 end

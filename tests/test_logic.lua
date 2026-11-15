@@ -11,12 +11,13 @@ local function check(name, ok)
   end
 end
 
-local function pose(x, z, vx, brake, wheels)
+local function pose(x, z, vx, brake, wheels, steer)
   return {
     pos = { x = x, y = 0, z = z },
     dir = { x = 0, y = 0, z = 1 },
     vel = { x = vx or 0, y = 0, z = 0 },
     brake = brake or 0,
+    steer = steer or 0,
     wheels = wheels or { 0, 0, 0, 0 },
   }
 end
@@ -120,17 +121,19 @@ end
 do
   local state = logic.create()
   logic.handle(state, logic.RECORD, two)
-  logic.capture(state, 0, pose(0, 0, 0, 0, { 1, 2, 3, 4 }))
-  logic.capture(state, 1, pose(10, 0, 10, 1, { 5, 6, 7, 8 }))
+  logic.capture(state, 0, pose(0, 0, 0, 0, { 1, 2, 3, 4 }, -0.5))
+  logic.capture(state, 1, pose(10, 0, 10, 1, { 5, 6, 7, 8 }, 0.5))
   logic.handle(state, logic.RECORD, two)
   logic.handle(state, logic.APPEAR, two)
   local held = logic.lead_pose(state, 0)
   check('waiting clears wheel spin and brake', held.brake == 0 and held.wheels[3] == 0)
+  check('waiting keeps steer', held.steer == -0.5)
   logic.handle(state, logic.START, two)
   local mid
   for _ = 1, 5 do mid = logic.lead_pose(state, 0.1) end
   check('playback blends brake', math.abs(mid.brake - 0.5) < 0.001)
   check('playback blends rear wheel speed', math.abs(mid.wheels[3] - 5) < 0.001)
+  check('playback blends steer', math.abs(mid.steer - 0) < 0.001)
 end
 
 if failures > 0 then
