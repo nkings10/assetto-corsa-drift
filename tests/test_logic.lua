@@ -162,6 +162,21 @@ do
     'import rejects wrong track',
     ok == nil and #blocked.samples == 0 and type(err) == 'string' and err:find('Needs track: test_track', 1, true)
   )
+  local broken, why = logic.decode('{"kind":"solo_tandems","samples":[{"t":1},null,{"t":2}]}')
+  check('null in a lead file is a bad file', broken == nil and why == 'Bad file')
+  local missing, missing_why = logic.decode('{"kind":"solo_tandems","samples":[{"pos":null,"dir":{"x":0,"y":0,"z":1}}]}')
+  check('null position is a bad file', missing == nil and missing_why == 'Bad file')
+  local kept = logic.create()
+  kept.samples = { pose(1, 2) }
+  local bad_meta, bad_err = logic.apply_pack(kept, {
+    kind = 'solo_tandems',
+    trackId = 'test_track',
+    samples = { { t = 1 } },
+  }, { trackId = 'test_track' })
+  check(
+    'a sample without a position is a bad file',
+    bad_meta == nil and bad_err == 'Bad file' and #kept.samples == 1
+  )
 end
 
 if failures > 0 then

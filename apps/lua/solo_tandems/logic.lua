@@ -383,6 +383,8 @@ local function skip_ws(s, i)
   end
 end
 
+local JSON_NULL = {}
+
 local function parse_json(s, i)
   i = skip_ws(s, i or 1)
   local c = s:sub(i, i)
@@ -421,6 +423,7 @@ local function parse_json(s, i)
       if s:sub(i, i) ~= ':' then return nil, i end
       local val
       val, i = parse_json(s, i + 1)
+      if val == nil or val == JSON_NULL then return nil, i end
       obj[key] = val
       i = skip_ws(s, i)
       local sep = s:sub(i, i)
@@ -438,6 +441,7 @@ local function parse_json(s, i)
     while i <= #s do
       local val
       val, i = parse_json(s, i)
+      if val == nil or val == JSON_NULL then return nil, i end
       arr[#arr + 1] = val
       i = skip_ws(s, i)
       local sep = s:sub(i, i)
@@ -449,7 +453,7 @@ local function parse_json(s, i)
   end
   if s:sub(i, i + 3) == 'true' then return true, i + 4 end
   if s:sub(i, i + 4) == 'false' then return false, i + 5 end
-  if s:sub(i, i + 3) == 'null' then return nil, i + 4 end
+  if s:sub(i, i + 3) == 'null' then return JSON_NULL, i + 4 end
   local num, rest = s:match('^([%-]?%d+%.?%d*[eE]?[%+%-]?%d*)()', i)
   if num then return tonumber(num), rest end
   return nil, i
@@ -486,10 +490,17 @@ function M.decode(text)
     return nil, 'Empty file'
   end
   local data = select(1, parse_json(text, 1))
-  if type(data) ~= 'table' then
+  if data == JSON_NULL or type(data) ~= 'table' then
     return nil, 'Bad file'
   end
   return data
+end
+
+local function vec_ok(v)
+  return type(v) == 'table'
+    and type(v.x) == 'number'
+    and type(v.y) == 'number'
+    and type(v.z) == 'number'
 end
 
 function M.apply_pack(state, payload, opts)
@@ -512,8 +523,12 @@ function M.apply_pack(state, payload, opts)
   local samples = {}
   local elapsed = 0
   for i = 1, #samples_in do
-    local s = pose_copy(samples_in[i])
-    s.t = samples_in[i].t or elapsed
+    local raw = samples_in[i]
+    if type(raw) ~= 'table' or not vec_ok(raw.pos) or not vec_ok(raw.dir) then
+      return nil, 'Bad file'
+    end
+    local s = pose_copy(raw)
+    s.t = raw.t or elapsed
     if s.t > elapsed then elapsed = s.t end
     samples[i] = s
   end
