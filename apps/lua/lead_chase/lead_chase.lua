@@ -173,7 +173,8 @@ local function set_lead_lights(braking)
   end
   if ac.setBrakingLightsThreshold ~= nil then
     -- Default threshold is ~0.01; AI often holds brake, which keeps lights on.
-    call(ac.setBrakingLightsThreshold, braking and 0.01 or 10)
+    -- Use 0 when we want lights so any pedal > 0 counts.
+    call(ac.setBrakingLightsThreshold, braking and 0 or 10)
   end
   call(ac.setTargetCar, 0)
 end
@@ -267,7 +268,8 @@ local function show_lead(pose)
   local braking = (pose.brake or 0) > 0.05
   set_lead_lights(braking)
   if braking then
-    apply_brake_pedal(1, pose.brake)
+    -- Full pedal so lights light even if AI input was zeroed.
+    apply_brake_pedal(1, 1)
   end
 end
 
@@ -349,18 +351,14 @@ function script.update(dt)
   end
 end
 
-function script.draw3D(dt)
+function script.draw3D()
   if not visual.shown then return end
   if not ensure_wheel_nodes() then return end
 
   local now = os.preciseClock and os.preciseClock() or nil
-  local step = dt
-  if step == nil or step <= 0 then
-    if visual.last_t ~= nil and now ~= nil then
-      step = now - visual.last_t
-    else
-      step = 0.016
-    end
+  local step = 0.016
+  if visual.last_t ~= nil and now ~= nil then
+    step = now - visual.last_t
   end
   if now ~= nil then visual.last_t = now end
   if step > 0.1 then step = 0.1 end
