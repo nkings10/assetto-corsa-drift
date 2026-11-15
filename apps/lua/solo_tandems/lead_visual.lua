@@ -328,7 +328,11 @@ local function find_meshes(root)
   tyre_meshes = grab({ '{ ?TYRE? , ?tyre? , ?TIRE? , ?tire? }' })
 
   local brk_entry = light_data.brake_entries[1]
+  local hl_entry = light_data.headlight_entries[1]
+  local tl_entry = light_data.taillight_entries[1]
   glow_brake.values.gGlowColor = car_lights.glow_color(brk_entry, 0.8)
+  glow_head.values.gGlowColor = car_lights.glow_color(hl_entry or { color = { r = 1, g = 1, b = 0.9 } }, 1.5)
+  glow_tail.values.gGlowColor = car_lights.glow_color(tl_entry or { color = { r = 0.6, g = 0.01, b = 0.01 } }, 0.6)
   glow_brake.meshes = brake_meshes
   glow_head.meshes = head_meshes
   glow_tail.meshes = tail_meshes
@@ -433,6 +437,24 @@ local function dispose_brake_lights()
   brake_l, brake_r = nil, nil
 end
 
+local function dispose_running_lights()
+  dispose_light(head_l)
+  dispose_light(head_r)
+  dispose_light(tail_light)
+  head_l, head_r, tail_light = nil, nil, nil
+  lights_on = false
+end
+
+local function head_emissive_level()
+  local entry = light_data and light_data.headlight_entries[1] or nil
+  return car_lights.head_emissive(entry)
+end
+
+local function tail_emissive_level()
+  local entry = light_data and light_data.taillight_entries[1] or nil
+  return car_lights.tail_emissive(entry)
+end
+
 local function apply_light_params(light, entry, defs)
   if light == nil then return end
   light.color = car_lights.entry_light_color(entry, defs.color_scale)
@@ -478,34 +500,46 @@ end
 local function ensure_running_light_sources()
   if head_l ~= nil then return end
   if ac.LightSource == nil then return end
+  local hl_entries = (light_data and light_data.headlight_entries) or {}
+  local tl_entries = (light_data and light_data.taillight_entries) or {}
+  local hl_defs = {
+    color_scale = 8,
+    specular = 1.0,
+    range = 80,
+    range_grad = 0.3,
+    fade_at = 400,
+    fade_smooth = 100,
+    spot = 60,
+    spot_sharp = 0.7,
+  }
+  local tl_defs = {
+    color_scale = 60,
+    specular = 0.5,
+    range = 25,
+    range_grad = 0.2,
+    fade_at = 200,
+    fade_smooth = 80,
+    spot = 120,
+    spot_sharp = 0.3,
+  }
+  local default_hl = { color = { r = 0.78, g = 0.78, b = 0.7 }, color_intensity = 255 }
+  local default_tl = { color = { r = 0.04, g = 0, b = 0 }, color_intensity = 255 }
+  local hl_l = hl_entries[1] or default_hl
+  local hl_r = hl_entries[2] or hl_entries[1] or default_hl
+  local tl_e = tl_entries[1] or default_tl
   local ok1, a = pcall(ac.LightSource, ac.LightType.Regular)
   local ok2, b = pcall(ac.LightSource, ac.LightType.Regular)
   local ok3, c = pcall(ac.LightSource, ac.LightType.Regular)
   if ok1 and a then
-    a.color = rgb(8, 8, 7)
-    a.range = 60
-    a.spot = 55
-    a.spotSharpness = 0.4
-    a.shadows = false
-    a.position = vec3(0, -1000, 0)
+    apply_light_params(a, hl_l, hl_defs)
     head_l = a
   end
   if ok2 and b then
-    b.color = rgb(8, 8, 7)
-    b.range = 60
-    b.spot = 55
-    b.spotSharpness = 0.4
-    b.shadows = false
-    b.position = vec3(0, -1000, 0)
+    apply_light_params(b, hl_r, hl_defs)
     head_r = b
   end
   if ok3 and c then
-    c.color = rgb(4, 0, 0)
-    c.range = 18
-    c.spot = 110
-    c.spotSharpness = 0.3
-    c.shadows = false
-    c.position = vec3(0, -1000, 0)
+    apply_light_params(c, tl_e, tl_defs)
     tail_light = c
   end
 end
@@ -527,13 +561,26 @@ local function set_emissive(meshes, on, intensity, ambient)
   end
 end
 
+local function apply_running_emissive()
+  local hl = head_emissive_level()
+  local tl = tail_emissive_level()
+  set_emissive(head_meshes, true, hl, hl * 0.3)
+  if not brake_on or brake_meshes ~= tail_meshes then
+    set_emissive(tail_meshes, true, tl, tl * 0.25)
+  end
+end
+
 local function set_running_lights(on)
   if on == lights_on then return end
   lights_on = on
-  ensure_running_light_sources()
-  set_emissive(head_meshes, on, 100, 30)
-  set_emissive(tail_meshes, on, 60, 15)
-  if not on then
+  if on then
+    ensure_running_light_sources()
+    apply_running_emissive()
+  else
+    set_emissive(head_meshes, false, 0, 0)
+    if not brake_on then
+      set_emissive(tail_meshes, false, 0, 0)
+    end
     hide_light(head_l)
     hide_light(head_r)
     hide_light(tail_light)
@@ -553,6 +600,70 @@ local function local_dir_to_world(look, up, side, local_dir)
   return (side * local_dir.x + up * local_dir.y + look * local_dir.z):normalize()
 end
 
+local function update_running_lights(look, up, side, pos)
+  if not lights_on or look == nil or up == nil or side == nil or pos == nil then
+    hide_light(head_l)
+    hide_light(head_r)
+    hide_light(tail_light)
+    return
+  end
+  ensure_running_light_sources()
+  if head_l == nil then return end
+
+  local hl_entries = (light_data and light_data.headlight_entries) or {}
+  local tl_entries = (light_data and light_data.taillight_entries) or {}
+  local size = vec3(1.8, 1.3, 4.5)
+  local head_dir = (look - up * 0.08):normalize()
+
+  if #hl_entries >= 2 and valid_local_pos(hl_entries[1].position) and valid_local_pos(hl_entries[2].position) then
+    head_l.position = local_to_world(pos, look, up, side, hl_entries[1].position)
+    head_l.direction = hl_entries[1].direction and local_dir_to_world(look, up, side, hl_entries[1].direction) or head_dir
+    if head_r then
+      head_r.position = local_to_world(pos, look, up, side, hl_entries[2].position)
+      head_r.direction = hl_entries[2].direction and local_dir_to_world(look, up, side, hl_entries[2].direction) or head_dir
+    end
+  elseif #hl_entries >= 1 and valid_local_pos(hl_entries[1].position) then
+    local lp = hl_entries[1].position
+    local dir = hl_entries[1].direction and local_dir_to_world(look, up, side, hl_entries[1].direction) or head_dir
+    head_l.position = local_to_world(pos, look, up, side, lp)
+    head_l.direction = dir
+    if head_r then
+      head_r.position = local_to_world(pos, look, up, side, { x = -lp.x, y = lp.y, z = lp.z })
+      head_r.direction = dir
+    end
+  else
+    local front = pos + look * (size.z * 0.48) + up * (size.y * 0.42)
+    local side_off = size.x * 0.35
+    head_l.position = front + side * side_off
+    head_l.direction = head_dir
+    if head_r then
+      head_r.position = front - side * side_off
+      head_r.direction = head_dir
+    end
+  end
+
+  if tail_light == nil then return end
+  local avg_x, avg_y, avg_z, count = 0, 0, 0, 0
+  for i = 1, #tl_entries do
+    local e = tl_entries[i]
+    if valid_local_pos(e.position) then
+      avg_x = avg_x + e.position.x
+      avg_y = avg_y + e.position.y
+      avg_z = avg_z + e.position.z
+      count = count + 1
+    end
+  end
+  if count > 0 then
+    local lp = { x = avg_x / count, y = avg_y / count, z = avg_z / count }
+    tail_light.position = local_to_world(pos, look, up, side, lp)
+    local dir_src = tl_entries[1] and tl_entries[1].direction or nil
+    tail_light.direction = local_dir_to_world(look, up, side, dir_src)
+  else
+    tail_light.position = pos - look * (size.z * 0.48) + up * (size.y * 0.42)
+    tail_light.direction = (-look - up * 0.05):normalize()
+  end
+end
+
 local function set_brake_visual(on, look, up, side, pos)
   ensure_brake_lights()
   local entry = light_data and light_data.brake_entries[1] or nil
@@ -564,9 +675,16 @@ local function set_brake_visual(on, look, up, side, pos)
       set_emissive(meshes, true, intensity, intensity * 0.25)
       glow_brake.values.gGlowColor = car_lights.glow_color(entry, 0.8)
     else
-      set_emissive(meshes, false, 0, 0)
-      if brake_meshes ~= nil and tail_meshes ~= nil and brake_meshes ~= tail_meshes then
-        set_emissive(tail_meshes, false, 0, 0)
+      -- Restore running-light emissive when headlights are on (TandemGhost behaviour).
+      if lights_on and meshes == tail_meshes then
+        local tl = tail_emissive_level()
+        set_emissive(meshes, true, tl, tl * 0.25)
+      else
+        set_emissive(meshes, false, 0, 0)
+        if lights_on and brake_meshes ~= nil and tail_meshes ~= nil and brake_meshes ~= tail_meshes then
+          local tl = tail_emissive_level()
+          set_emissive(tail_meshes, true, tl, tl * 0.25)
+        end
       end
     end
   end
@@ -970,6 +1088,7 @@ function M.ensure(car_id)
   loaded_id = car_id
   stop_sound()
   dispose_brake_lights()
+  dispose_running_lights()
   light_data = nil
   if node ~= nil then
     pcall(function()
@@ -1119,10 +1238,8 @@ function M.show(pose, dt)
   end
 
   update_wipers(dt)
-  -- Head/tail stay off unless we add a lights toggle later; only brake glow when braking.
-  if lights_on then
-    set_running_lights(false)
-  end
+  set_running_lights(true)
+  update_running_lights(look, up, side, pos)
   set_brake_visual((pose.brake or 0) > 0.08, look, up, side, pos)
   update_smoke(pose, look, side, pos, dt)
   update_wetness()
@@ -1131,6 +1248,14 @@ end
 
 function M.draw_glows()
   if not ready or was_hidden or render == nil or render.mesh == nil then return end
+  if lights_on then
+    if glow_head.meshes ~= nil then
+      pcall(render.mesh, glow_head)
+    end
+    if glow_tail.meshes ~= nil and not brake_on then
+      pcall(render.mesh, glow_tail)
+    end
+  end
   if brake_on then
     glow_brake.meshes = brake_meshes or tail_meshes
     if glow_brake.meshes ~= nil then

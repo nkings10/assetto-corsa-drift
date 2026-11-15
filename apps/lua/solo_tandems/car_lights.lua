@@ -291,6 +291,22 @@ function M.brake_emissive(entry)
   return intensity
 end
 
+function M.head_emissive(entry)
+  local intensity = 100
+  if entry ~= nil and (entry.color_intensity or 0) > 0 then
+    intensity = math.min(entry.color_intensity / 255 * 100, 500)
+  end
+  return intensity
+end
+
+function M.tail_emissive(entry)
+  local intensity = 60
+  if entry ~= nil and (entry.color_intensity or 0) > 0 then
+    intensity = math.min(entry.color_intensity / 255 * 60, 300)
+  end
+  return intensity
+end
+
 function M.glow_color(entry, scale)
   scale = scale or 0.8
   local c = (entry and entry.color) or { r = 1, g = 0.02, b = 0.02 }
