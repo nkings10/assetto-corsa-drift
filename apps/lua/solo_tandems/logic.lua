@@ -3,8 +3,8 @@
 local M = {}
 
 M.RECORD = 'record'
-M.APPEAR = 'appear'
-M.SPOT = 'spot'
+M.SPAWN = 'spawn'
+M.CHASE = 'chase'
 M.TELEPORT = 'teleport'
 M.START = 'start'
 M.CLEAR = 'clear'
@@ -116,13 +116,13 @@ function M.create()
     placed = false,
     playing = false,
     play_t = 0,
-    spot = nil,
+    chase_pose = nil,
     pulse = nil,
     notice = 'Ready',
   }
 end
 
-function M.has_lead(state)
+function M.has_lead_run(state)
   return #state.samples > 0
 end
 
@@ -131,7 +131,7 @@ local function stop_playback(state)
   state.play_t = 0
 end
 
-local function hide_lead(state)
+local function hide_lead_car(state)
   state.placed = false
   stop_playback(state)
 end
@@ -154,7 +154,7 @@ function M.handle(state, action, ctx)
     state.recording = true
     state.samples = {}
     state.elapsed = 0
-    hide_lead(state)
+    hide_lead_car(state)
     state.notice = 'Recording'
     return state
   end
@@ -163,18 +163,18 @@ function M.handle(state, action, ctx)
     state.recording = false
     state.samples = {}
     state.elapsed = 0
-    hide_lead(state)
+    hide_lead_car(state)
     state.notice = 'Lead run cleared'
     return state
   end
 
-  if action == M.SPOT then
+  if action == M.CHASE then
     if ctx.pose == nil then
       state.notice = 'No car to mark'
       return state
     end
     local pose = pose_copy(ctx.pose)
-    state.spot = { pos = pose.pos, dir = pose.dir }
+    state.chase_pose = { pos = pose.pos, dir = pose.dir }
     state.notice = 'Chase car set'
     return state
   end
@@ -184,7 +184,7 @@ function M.handle(state, action, ctx)
     return state
   end
 
-  if action == M.APPEAR then
+  if action == M.SPAWN then
     if #state.samples == 0 then
       state.notice = 'No lead run recorded'
       return state
@@ -207,7 +207,7 @@ function M.handle(state, action, ctx)
   end
 
   if action == M.TELEPORT then
-    if state.spot == nil then
+    if state.chase_pose == nil then
       state.notice = 'Set the chase car first'
       return state
     end
@@ -245,7 +245,7 @@ function M.capture(state, dt, pose)
   state.samples[#state.samples + 1] = sample
 end
 
-function M.lead_pose(state, dt)
+function M.lead_run_pose(state, dt)
   if not state.placed or #state.samples == 0 then
     return nil, 'hidden'
   end
@@ -497,7 +497,7 @@ function M.apply_pack(state, payload, opts)
   if state == nil or type(payload) ~= 'table' then
     return nil, 'Bad data'
   end
-  if payload.kind ~= nil and payload.kind ~= 'solo_tandems' then
+  if payload.kind ~= 'solo_tandems' then
     return nil, 'Not a Solo Tandems file'
   end
   local file_track = tostring(payload.trackId or '')
@@ -520,7 +520,7 @@ function M.apply_pack(state, payload, opts)
   state.recording = false
   state.samples = samples
   state.elapsed = elapsed
-  hide_lead(state)
+  hide_lead_car(state)
   state.notice = 'Lead run imported'
   return {
     carId = payload.carId or '',

@@ -128,8 +128,8 @@ end
 
 local ACTIONS = {
   [1] = logic.RECORD,
-  [2] = logic.APPEAR,
-  [3] = logic.SPOT,
+  [2] = logic.SPAWN,
+  [3] = logic.CHASE,
   [4] = logic.TELEPORT,
   [5] = logic.START,
   [6] = logic.CLEAR,
@@ -137,8 +137,8 @@ local ACTIONS = {
 
 local NAMES = {
   record = logic.RECORD,
-  spawn = logic.APPEAR,
-  chase = logic.SPOT,
+  spawn = logic.SPAWN,
+  chase = logic.CHASE,
   teleport = logic.TELEPORT,
   start = logic.START,
   clear = logic.CLEAR,
@@ -276,9 +276,9 @@ local function move_car(index, pose, speed)
 end
 
 local function teleport_player()
-  local spot = state.spot
-  if spot == nil or physics == nil then return end
-  local pose = { pos = spot.pos, dir = spot.dir, vel = { x = 0, y = 0, z = 0 } }
+  local chase_pose = state.chase_pose
+  if chase_pose == nil or physics == nil then return end
+  local pose = { pos = chase_pose.pos, dir = chase_pose.dir, vel = { x = 0, y = 0, z = 0 } }
   move_car(0, pose, pose.vel)
   call(physics.engageGear, 0, 0)
 end
@@ -497,7 +497,7 @@ function script.update(dt)
     logic.capture(state, dt, read_pose(car))
   end
 
-  local pose = logic.lead_pose(state, dt)
+  local pose = logic.lead_run_pose(state, dt)
   if pose == nil then
     lead_visual.hide()
   else
@@ -576,10 +576,10 @@ function script.windowMain(dt)
   ui.separator()
   if ui.button('Record') then press(logic.RECORD) end
   ui.sameLine(0, 8)
-  if ui.button('Spawn') then press(logic.APPEAR) end
+  if ui.button('Spawn') then press(logic.SPAWN) end
   ui.sameLine(0, 8)
   if ui.button('Start') then press(logic.START) end
-  if ui.button('Chase') then press(logic.SPOT) end
+  if ui.button('Chase') then press(logic.CHASE) end
   ui.sameLine(0, 8)
   if ui.button('Teleport') then press(logic.TELEPORT) end
   ui.sameLine(0, 8)
