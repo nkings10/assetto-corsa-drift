@@ -29,6 +29,16 @@ local visual = {
   node_ok = false,
 }
 
+-- Split capture vs inject so we can see which side is broken.
+local diag = {
+  force_wheels = false,
+  force_brake = false,
+  force_steer = 0,
+  draw3d_frames = 0,
+  last_live = nil,
+  last_sample = nil,
+}
+
 local ACTIONS = {
   [1] = logic.RECORD,
   [2] = logic.APPEAR,
@@ -191,15 +201,34 @@ local function apply_brake_pedal(index, brake)
   controls.steer = math.huge
 end
 
+local function sample_summary(pose)
+  if pose == nil then return nil end
+  return {
+    brake = pose.brake or 0,
+    steer = pose.steer or 0,
+    rl = pose.wheels and (pose.wheels[3] or 0) or 0,
+    speed = speed_ms(pose.vel),
+  }
+end
+
 local function set_visual(pose)
-  if pose == nil then
+  if pose == nil and not diag.force_wheels and diag.force_steer == 0 and not diag.force_brake then
     visual.shown = false
     visual.omega = { 0, 0, 0, 0 }
     return
   end
+  if pose == nil and not visual.shown then return end
   visual.shown = true
-  visual.steer = pose.steer or 0
-  visual.omega = wheel_values(pose.wheels, pose.vel)
+  if diag.force_wheels then
+    visual.omega = { 40, 40, 40, 40 }
+  elseif pose ~= nil then
+    visual.omega = wheel_values(pose.wheels, pose.vel)
+  end
+  if diag.force_steer ~= 0 then
+    visual.steer = diag.force_steer
+  elseif pose ~= nil then
+    visual.steer = pose.steer or 0
+  end
 end
 
 local function ensure_wheel_nodes()
@@ -265,7 +294,7 @@ local function show_lead(pose)
   call(physics.setAINoInput, 1, true, false)
   move_car(1, pose, pose.vel)
   set_visual(pose)
-  local braking = (pose.brake or 0) > 0.05
+  local braking = diag.force_brake or (pose.brake or 0) > 0.05
   set_lead_lights(braking)
   if braking then
     -- Full pedal so lights light even if AI input was zeroed.
@@ -337,8 +366,16 @@ function script.update(dt)
   end
 
   local car = player()
+  if car ~= nil then
+    diag.last_live = sample_summary(read_pose(car))
+  end
   if state.recording and car ~= nil then
     logic.capture(state, dt, read_pose(car))
+  end
+  if #state.samples > 0 then
+    diag.last_sample = sample_summary(state.samples[#state.samples])
+  else
+    diag.last_sample = nil
   end
 
   if car_count() >= 2 and can_move() then
@@ -352,6 +389,7 @@ function script.update(dt)
 end
 
 function script.draw3D()
+  diag.draw3d_frames = diag.draw3d_frames + 1
   if not visual.shown then return end
   if not ensure_wheel_nodes() then return end
 
@@ -373,6 +411,17 @@ function script.draw3D()
   end
 end
 
+local function fmt_sample(label, s)
+  if s == nil then
+    ui.text(label .. ': none')
+    return
+  end
+  ui.text(string.format(
+    '%s: brake %.2f  steer %.2f  RL %.1f  speed %.1f',
+    label, s.brake, s.steer, s.rl, s.speed
+  ))
+end
+
 function script.windowMain(dt)
   ui.text(state.notice)
   ui.text(state.recording and 'Recording' or 'Not recording')
@@ -382,22 +431,49 @@ function script.windowMain(dt)
   else
     ui.text('Lead is hidden')
   end
-  ui.text(state.spot and 'Chase spot saved' or 'No chase spot')
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off')
   ui.text('Cars: ' .. tostring(car_count()))
-  ui.text(visual.node_ok and 'Wheel nodes: ok' or 'Wheel nodes: missing')
-  ui.text(string.format('Visual steer %.2f  RL omega %.1f', visual.steer or 0, visual.omega[3] or 0))
+
+  ui.separator()
+  ui.text('DIAGNOSTIC')
+  fmt_sample('Live player', diag.last_live)
+  fmt_sample('Last sample', diag.last_sample)
+  ui.text(string.format(
+    'draw3D frames %d  nodes %s',
+    diag.draw3d_frames,
+    visual.node_ok and 'ok' or 'missing'
+  ))
+  ui.text(string.format('Inject aim: steer %.2f  RL omega %.1f', visual.steer or 0, visual.omega[3] or 0))
+
+  if ui.button(diag.force_wheels and 'Force wheels: ON' or 'Force wheels: off') then
+    diag.force_wheels = not diag.force_wheels
+  end
+  ui.sameLine(0, 8)
+  if ui.button(diag.force_brake and 'Force brake lights: ON' or 'Force brake lights: off') then
+    diag.force_brake = not diag.force_brake
+  end
+  if ui.button(diag.force_steer < 0 and 'Force steer: LEFT' or 'Force steer left') then
+    diag.force_steer = diag.force_steer < 0 and 0 or -1
+  end
+  ui.sameLine(0, 8)
+  if ui.button(diag.force_steer > 0 and 'Force steer: RIGHT' or 'Force steer right') then
+    diag.force_steer = diag.force_steer > 0 and 0 or 1
+  end
+
   if ac.getCar ~= nil then
     local ok, lead = pcall(ac.getCar, 1)
     if ok and lead ~= nil then
       ui.text(string.format(
-        'Lead brake %.2f  lights %s  signals %s',
+        'Lead readback: brake %.2f  lights %s',
         lead.brake or -1,
-        tostring(lead.brakeLightsActive),
-        tostring(lead.turningLeftLights or lead.turningRightLights or false)
+        tostring(lead.brakeLightsActive)
       ))
+    else
+      ui.text('Lead readback: no car 1')
     end
   end
-  ui.text('Stream Deck actions: lead.record, lead.appear, lead.spot, lead.teleport, lead.start, lead.clear')
-  ui.text('CSP controls: Lead chase/Record, Appear, Chase spot, Teleport, Start, Clear lead')
+
+  ui.text('1) Record while steering/braking — Last sample should move.')
+  ui.text('2) Appear lead, toggle Force wheels/brake/steer — watch the lead.')
+  ui.text('3) Tell me: Last sample numbers, draw3D frames, Force results.')
 end
