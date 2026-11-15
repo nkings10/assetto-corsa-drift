@@ -512,18 +512,27 @@ function script.windowMain(dt)
     sync_car_option_index()
   end
   if car_options ~= nil and #car_options > 0 then
-    if ui.button('Car <') then
-      car_option_i = math.max(1, car_option_i - 1)
-      apply_car_option()
+    local preview = car_options[car_option_i] and car_options[car_option_i].label or 'Ghost car'
+    local flags = nil
+    if ui.ComboFlags ~= nil and ui.ComboFlags.HeightLarge ~= nil then
+      flags = ui.ComboFlags.HeightLarge
     end
-    ui.sameLine(0, 8)
-    ui.text(tostring(car_options[car_option_i] and car_options[car_option_i].label or ''))
-    ui.sameLine(0, 8)
-    if ui.button('Car >') then
-      car_option_i = math.min(#car_options, car_option_i + 1)
-      apply_car_option()
+    local function draw_car_combo()
+      for i = 1, #car_options do
+        local opt = car_options[i]
+        if ui.selectable(opt.label, i == car_option_i) then
+          if i ~= car_option_i then
+            car_option_i = i
+            apply_car_option()
+          end
+        end
+      end
     end
-    ui.text(string.format('%d / %d', car_option_i, #car_options))
+    if flags ~= nil then
+      pcall(ui.combo, 'Ghost car', preview, flags, draw_car_combo)
+    else
+      pcall(ui.combo, 'Ghost car', preview, draw_car_combo)
+    end
   end
 
   ui.separator()
