@@ -237,9 +237,11 @@ local function find_meshes(root)
     end
     return nil
   end
+  -- Do not use bare ?BRAKE? — that matches BRAKE_DISC rotors, not lights.
   brake_meshes = grab({
-    '{ ?BRAKE? , ?brake? , actsAsBrakeLights:yes }',
-    '{ ?LIGHT_BRAKE? , ?light_brake? }',
+    '{ actsAsBrakeLights:yes }',
+    '{ ?LIGHT_BRAKE? , ?light_brake? , ?BRAKE_LIGHT? , ?brake_light? }',
+    '{ ?STOPLIGHT? , ?stop_light? , ?STOP_LIGHT? }',
   })
   head_meshes = grab({
     '{ ?HEADLIGHT? , ?headlight? , ?HEAD_LIGHT? }',
@@ -254,6 +256,43 @@ local function find_meshes(root)
   end)
   all_meshes = (ok_all and meshes) or nil
   exterior_meshes = all_meshes
+  if brake_meshes == nil and all_meshes ~= nil then
+    local names = {}
+    for i = 1, #all_meshes do
+      local mesh_name = nil
+      pcall(function()
+        mesh_name = all_meshes:name(i)
+      end)
+      if type(mesh_name) == 'string' then
+        local lo = mesh_name:lower()
+        local skip = lo:find('disc', 1, true) or lo:find('disk', 1, true)
+          or lo:find('rotor', 1, true) or lo:find('caliper', 1, true)
+          or lo:find('pad', 1, true) or lo:find('tyre', 1, true)
+          or lo:find('tire', 1, true) or lo:find('rim', 1, true)
+        local hit = lo:find('brakelight', 1, true) or lo:find('brake_light', 1, true)
+          or lo:find('light_brake', 1, true) or lo:find('stoplight', 1, true)
+          or lo:find('stop_light', 1, true) or lo:find('ref_bl', 1, true)
+          or lo:find('ref_br', 1, true)
+        if hit and not skip then
+          names[#names + 1] = mesh_name
+        end
+      end
+    end
+    if #names > 0 then
+      local ok_brk, found = pcall(function()
+        return root:findMeshes(names)
+      end)
+      if ok_brk and found ~= nil and #found > 0 then
+        pcall(function()
+          found:ensureUniqueMaterials()
+        end)
+        brake_meshes = found
+      end
+    end
+  end
+  if brake_meshes == nil then
+    brake_meshes = tail_meshes
+  end
   tyre_meshes = grab({ '{ ?TYRE? , ?tyre? , ?TIRE? , ?tire? }' })
   glow_brake.meshes = brake_meshes
   glow_head.meshes = head_meshes
@@ -407,7 +446,7 @@ local function set_brake_visual(on, look, up, side, pos)
     brake_on = on
     -- Prefer dedicated brake meshes; fall back to taillight meshes only while braking.
     local meshes = brake_meshes or tail_meshes
-    set_emissive(meshes, on, 55, 14)
+    set_emissive(meshes, on, 90, 22)
     if not on and brake_meshes ~= nil and tail_meshes ~= nil and brake_meshes ~= tail_meshes then
       set_emissive(tail_meshes, false, 0, 0)
     end
