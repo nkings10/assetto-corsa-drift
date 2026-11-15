@@ -1,4 +1,4 @@
--- Visual lead: KN5 ghost with wheels, discs, steer wheel, lights, smoke, wipers, ground snap, wetness, sound.
+-- Visual lead: KN5 lead with wheels, discs, steer wheel, lights, smoke, wipers, ground snap, wetness, sound.
 
 local M = {}
 
@@ -724,7 +724,7 @@ function M.ensure(car_id)
     return false
   end
   local ok_node, created = pcall(function()
-    return cars_root:createBoundingSphereNode('SoloTandemsGhost', 12)
+    return cars_root:createBoundingSphereNode('SoloTandemsLead', 12)
   end)
   if not ok_node or created == nil then
     status = 'node failed'

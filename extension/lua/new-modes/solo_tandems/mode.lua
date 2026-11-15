@@ -1,5 +1,5 @@
 -- Solo Tandems: Practice shell. Disable lap-cut invalidation for free roaming / chase.
--- The Solo Tandems app owns the visual ghost.
+-- The Solo Tandems app owns the visual lead.
 
 local cuts_ready = false
 

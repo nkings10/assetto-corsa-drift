@@ -1,5 +1,5 @@
--- Record a lead run and play it as a visual KN5 ghost. The player is the chase car.
--- Custom Shaders Patch 0.2.11. No second physics car — wheels/lights animate on the ghost.
+-- Record a lead run and play it as a visual KN5 lead. The player is the chase car.
+-- Custom Shaders Patch 0.2.11. No second physics car — wheels/lights animate on the lead.
 
 local function app_file(name)
   local folder = 'apps/lua/solo_tandems/'
@@ -13,13 +13,13 @@ local function app_file(name)
 end
 
 local logic = dofile(app_file('logic.lua'))
-local ghost = dofile(app_file('ghost_visual.lua'))
+local lead_visual = dofile(app_file('lead_visual.lua'))
 
 local state = logic.create()
 local deck_seq = 0
 local deck = nil
 local recorded_car_id = nil
-local ghost_override = nil
+local lead_override = nil
 local all_cars = nil
 local car_search = ''
 local car_options = nil
@@ -326,12 +326,12 @@ end
 
 local function sync_car_option_index()
   if car_options == nil then rebuild_car_options() end
-  if ghost_override == nil or ghost_override == '' then
+  if lead_override == nil or lead_override == '' then
     car_option_i = 1
     return
   end
   for i = 2, #car_options do
-    if car_options[i].id == ghost_override then
+    if car_options[i].id == lead_override then
       car_option_i = i
       return
     end
@@ -339,9 +339,9 @@ local function sync_car_option_index()
   car_option_i = 1
 end
 
-local function effective_ghost_id()
-  if ghost_override ~= nil and ghost_override ~= '' then
-    return ghost_override
+local function effective_lead_id()
+  if lead_override ~= nil and lead_override ~= '' then
+    return lead_override
   end
   return recorded_car_id or player_car_id()
 end
@@ -349,19 +349,19 @@ end
 local function apply_car_option()
   if car_options == nil or car_options[car_option_i] == nil then return end
   local picked = car_options[car_option_i]
-  local before = effective_ghost_id()
-  ghost_override = picked.id
-  local after = effective_ghost_id()
+  local before = effective_lead_id()
+  lead_override = picked.id
+  local after = effective_lead_id()
   if after ~= nil and after ~= before and state.placed then
-    ghost.ensure(after)
+    lead_visual.ensure(after)
   end
 end
 
-local function ensure_ghost()
-  local id = effective_ghost_id()
+local function ensure_lead()
+  local id = effective_lead_id()
   if id == nil then return false end
   if recorded_car_id == nil then recorded_car_id = id end
-  return ghost.ensure(id)
+  return lead_visual.ensure(id)
 end
 
 local function context()
@@ -433,9 +433,9 @@ local function import_run()
   if meta.carId ~= nil and meta.carId ~= '' then
     recorded_car_id = meta.carId
   end
-  ghost_override = nil
+  lead_override = nil
   car_options = nil
-  ghost.hide()
+  lead_visual.hide()
   state.notice = 'Imported ' .. name
 end
 
@@ -447,11 +447,11 @@ local function press(action)
   end
   if action == logic.RECORD and state.recording then
     recorded_car_id = player_car_id()
-    ghost_override = nil
+    lead_override = nil
     car_options = nil
   end
   if action == logic.CLEAR or (action == logic.RECORD and state.recording) then
-    ghost.hide()
+    lead_visual.hide()
   end
 end
 
@@ -499,16 +499,16 @@ function script.update(dt)
 
   local pose = logic.lead_pose(state, dt)
   if pose == nil then
-    ghost.hide()
+    lead_visual.hide()
   else
-    if ensure_ghost() then
-      ghost.show(pose, dt)
+    if ensure_lead() then
+      lead_visual.show(pose, dt)
     end
   end
 end
 
 function script.draw3D()
-  ghost.draw_glows()
+  lead_visual.draw_glows()
 end
 
 function script.windowMain(dt)
@@ -521,8 +521,8 @@ function script.windowMain(dt)
     ui.text('Lead is hidden')
   end
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off (teleport only)')
-  ui.text('Ghost: ' .. tostring(ghost.status()))
-  ui.text('Lead car: ' .. tostring(effective_ghost_id() or 'none'))
+  ui.text('Lead: ' .. tostring(lead_visual.status()))
+  ui.text('Lead car: ' .. tostring(effective_lead_id() or 'none'))
   if recorded_car_id ~= nil then
     ui.text('Recorded car: ' .. recorded_car_id)
   end
