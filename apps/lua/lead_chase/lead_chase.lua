@@ -37,6 +37,11 @@ local diag = {
   draw3d_frames = 0,
   last_live = nil,
   last_sample = nil,
+  history = {},
+  history_t = 0,
+  dump_t = 0,
+  dump_ok = nil,
+  dump_path = nil,
 }
 
 local ACTIONS = {
@@ -211,6 +216,106 @@ local function sample_summary(pose)
   }
 end
 
+local function diag_path()
+  if diag.dump_path ~= nil then return diag.dump_path end
+  diag.dump_path = 'c:/Users/P3/Projects/assetto-corsa-drift/.diag/lead_chase.json'
+  return diag.dump_path
+end
+
+local function lead_readback()
+  if ac.getCar == nil then return nil end
+  local ok, lead = pcall(ac.getCar, 1)
+  if not ok or lead == nil then return nil end
+  local rl = 0
+  if lead.wheels ~= nil and lead.wheels[2] ~= nil then
+    rl = lead.wheels[2].angularSpeed or 0
+  end
+  return {
+    brake = lead.brake or -1,
+    lights = lead.brakeLightsActive == true,
+    signals = (lead.turningLeftLights == true) or (lead.turningRightLights == true),
+    rl = rl,
+  }
+end
+
+local function recording_slices()
+  local n = #state.samples
+  if n == 0 then return nil end
+  local function at(i)
+    return sample_summary(state.samples[i])
+  end
+  return {
+    count = n,
+    first = at(1),
+    mid = at(math.max(1, math.floor((n + 1) / 2))),
+    last = at(n),
+  }
+end
+
+local function write_diag(reason)
+  if io == nil or io.save == nil then
+    diag.dump_ok = false
+    return false
+  end
+  local dir = 'c:/Users/P3/Projects/assetto-corsa-drift/.diag'
+  if io.createDir ~= nil then
+    pcall(io.createDir, dir)
+  end
+  local payload = {
+    t = os.time and os.time() or 0,
+    reason = reason or 'auto',
+    notice = state.notice,
+    recording = state.recording == true,
+    placed = state.placed == true,
+    playing = state.playing == true,
+    cars = car_count(),
+    physics = can_move(),
+    draw3d_frames = diag.draw3d_frames,
+    nodes_ok = visual.node_ok == true,
+    force = {
+      wheels = diag.force_wheels,
+      brake = diag.force_brake,
+      steer = diag.force_steer,
+    },
+    inject = {
+      steer = visual.steer or 0,
+      rl_omega = visual.omega[3] or 0,
+      shown = visual.shown == true,
+    },
+    live = diag.last_live,
+    last_sample = diag.last_sample,
+    recording_slices = recording_slices(),
+    history = diag.history,
+    lead = lead_readback(),
+  }
+  local text
+  if JSON ~= nil and JSON.stringify ~= nil then
+    local ok, encoded = pcall(JSON.stringify, payload)
+    if ok then text = encoded end
+  end
+  if text == nil and stringify ~= nil then
+    local ok, encoded = pcall(stringify, payload)
+    if ok then text = encoded end
+  end
+  if text == nil then
+    text = string.format(
+      '{"reason":"%s","samples":%d,"draw3d":%d,"nodes":%s,"live_brake":%.3f,"live_steer":%.3f,"live_rl":%.3f,"force_wheels":%s,"force_brake":%s}',
+      tostring(reason or 'auto'),
+      #state.samples,
+      diag.draw3d_frames,
+      tostring(visual.node_ok == true),
+      diag.last_live and diag.last_live.brake or -1,
+      diag.last_live and diag.last_live.steer or 0,
+      diag.last_live and diag.last_live.rl or 0,
+      tostring(diag.force_wheels),
+      tostring(diag.force_brake)
+    )
+  end
+  local ok = io.save(diag_path(), text, true)
+  diag.dump_ok = ok == true
+  return diag.dump_ok
+end
+
 local function set_visual(pose)
   if pose == nil and not diag.force_wheels and diag.force_steer == 0 and not diag.force_brake then
     visual.shown = false
@@ -378,6 +483,27 @@ function script.update(dt)
     diag.last_sample = nil
   end
 
+  diag.history_t = diag.history_t + (dt or 0)
+  if diag.history_t >= 0.5 and diag.last_live ~= nil then
+    diag.history_t = 0
+    diag.history[#diag.history + 1] = {
+      brake = diag.last_live.brake,
+      steer = diag.last_live.steer,
+      rl = diag.last_live.rl,
+      speed = diag.last_live.speed,
+      recording = state.recording == true,
+    }
+    if #diag.history > 40 then
+      table.remove(diag.history, 1)
+    end
+  end
+
+  diag.dump_t = diag.dump_t + (dt or 0)
+  if diag.dump_t >= 1 then
+    diag.dump_t = 0
+    write_diag('auto')
+  end
+
   if car_count() >= 2 and can_move() then
     local pose = logic.lead_pose(state, dt)
     if pose == nil then
@@ -447,33 +573,34 @@ function script.windowMain(dt)
 
   if ui.button(diag.force_wheels and 'Force wheels: ON' or 'Force wheels: off') then
     diag.force_wheels = not diag.force_wheels
+    write_diag('force_wheels')
   end
   ui.sameLine(0, 8)
   if ui.button(diag.force_brake and 'Force brake lights: ON' or 'Force brake lights: off') then
     diag.force_brake = not diag.force_brake
+    write_diag('force_brake')
   end
   if ui.button(diag.force_steer < 0 and 'Force steer: LEFT' or 'Force steer left') then
     diag.force_steer = diag.force_steer < 0 and 0 or -1
+    write_diag('force_steer')
   end
   ui.sameLine(0, 8)
   if ui.button(diag.force_steer > 0 and 'Force steer: RIGHT' or 'Force steer right') then
     diag.force_steer = diag.force_steer > 0 and 0 or 1
+    write_diag('force_steer')
+  end
+  if ui.button('Dump for agent') then
+    write_diag('manual')
+  end
+  ui.text(diag.dump_ok == nil and 'Dump: waiting' or (diag.dump_ok and 'Dump: ok' or 'Dump: FAILED'))
+  ui.text(diag_path())
+
+  local lead = lead_readback()
+  if lead ~= nil then
+    ui.text(string.format('Lead readback: brake %.2f  lights %s  RL %.1f', lead.brake, tostring(lead.lights), lead.rl))
+  else
+    ui.text('Lead readback: no car 1')
   end
 
-  if ac.getCar ~= nil then
-    local ok, lead = pcall(ac.getCar, 1)
-    if ok and lead ~= nil then
-      ui.text(string.format(
-        'Lead readback: brake %.2f  lights %s',
-        lead.brake or -1,
-        tostring(lead.brakeLightsActive)
-      ))
-    else
-      ui.text('Lead readback: no car 1')
-    end
-  end
-
-  ui.text('1) Record while steering/braking — Last sample should move.')
-  ui.text('2) Appear lead, toggle Force wheels/brake/steer — watch the lead.')
-  ui.text('3) Tell me: Last sample numbers, draw3D frames, Force results.')
+  ui.text('1) Record with steer/brake. 2) Appear lead. 3) Toggle Force *. 4) Dump for agent.')
 end
