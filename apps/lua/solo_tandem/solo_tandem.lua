@@ -152,12 +152,12 @@ local function bind(id)
 end
 
 local buttons = {
-  { key = 'record', button = bind('Solo Tandem/Record') },
-  { key = 'appear', button = bind('Solo Tandem/Appear') },
-  { key = 'spot', button = bind('Solo Tandem/Chase spot') },
-  { key = 'teleport', button = bind('Solo Tandem/Teleport') },
-  { key = 'start', button = bind('Solo Tandem/Start') },
-  { key = 'clear', button = bind('Solo Tandem/Clear lead') },
+  { key = 'record', button = bind('Solo Tandems/Record') },
+  { key = 'appear', button = bind('Solo Tandems/Appear') },
+  { key = 'spot', button = bind('Solo Tandems/Chase spot') },
+  { key = 'teleport', button = bind('Solo Tandems/Teleport') },
+  { key = 'start', button = bind('Solo Tandems/Start') },
+  { key = 'clear', button = bind('Solo Tandems/Clear lead') },
 }
 
 local function vec3_of(v)

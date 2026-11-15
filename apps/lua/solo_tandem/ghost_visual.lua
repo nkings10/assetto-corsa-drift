@@ -472,7 +472,7 @@ local function update_smoke(pose, look, side, pos, dt)
     if pose.vel then smoke_push.velocity = v3(pose.vel) end
   end
   local now = os.preciseClock and os.preciseClock() or smoke_clock + dt
-  -- Tandem fires ~120 Hz with many bursts; keep a lighter stream for Solo Tandem.
+  -- Tandem fires ~120 Hz with many bursts; keep a lighter stream for Solo Tandems.
   if drift <= 8 or speed <= 20 or now - smoke_clock < 0.04 then
     return
   end
