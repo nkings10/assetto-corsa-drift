@@ -54,10 +54,16 @@ local function lerp_wheels(a, b, u)
   }
 end
 
+local function copy_up(up)
+  if up == nil then return { x = 0, y = 1, z = 0 } end
+  return normalize(up)
+end
+
 local function pose_copy(pose)
   return {
     pos = copy3(pose.pos),
     dir = normalize(pose.dir),
+    up = copy_up(pose.up),
     vel = copy3(pose.vel or { x = 0, y = 0, z = 0 }),
     brake = pose.brake or 0,
     steer = pose.steer or 0,
@@ -69,6 +75,7 @@ local function hold_pose(sample)
   return {
     pos = copy3(sample.pos),
     dir = copy3(sample.dir),
+    up = copy_up(sample.up),
     vel = { x = 0, y = 0, z = 0 },
     brake = 0,
     steer = sample.steer or 0,
@@ -106,7 +113,6 @@ end
 
 function M.handle(state, action, ctx)
   ctx = ctx or {}
-  local cars = ctx.cars or 1
   local can_move = ctx.can_move ~= false
   state.pulse = nil
 
@@ -158,14 +164,6 @@ function M.handle(state, action, ctx)
       state.notice = 'No lead recorded'
       return state
     end
-    if cars < 2 then
-      state.notice = 'Add a second car'
-      return state
-    end
-    if not can_move then
-      state.notice = 'Extended physics is off'
-      return state
-    end
     state.placed = true
     stop_playback(state)
     state.notice = 'Lead is waiting'
@@ -175,10 +173,6 @@ function M.handle(state, action, ctx)
   if action == M.START then
     if not state.placed then
       state.notice = 'Put the lead in place first'
-      return state
-    end
-    if not can_move then
-      state.notice = 'Extended physics is off'
       return state
     end
     state.playing = true
@@ -199,10 +193,6 @@ function M.handle(state, action, ctx)
     state.pulse = 'teleport'
     if #state.samples == 0 then
       state.notice = 'Teleported'
-      return state
-    end
-    if cars < 2 then
-      state.notice = 'Teleported. Add a second car for the lead'
       return state
     end
     state.placed = true
@@ -248,6 +238,7 @@ function M.lead_pose(state, dt)
     return {
       pos = copy3(first.pos),
       dir = copy3(first.dir),
+      up = copy_up(first.up),
       vel = copy3(first.vel),
       brake = first.brake or 0,
       steer = first.steer or 0,
@@ -275,6 +266,7 @@ function M.lead_pose(state, dt)
   return {
     pos = lerp3(a.pos, b.pos, u),
     dir = normalize(lerp3(a.dir, b.dir, u)),
+    up = normalize(lerp3(a.up or { x = 0, y = 1, z = 0 }, b.up or { x = 0, y = 1, z = 0 }, u)),
     vel = lerp3(a.vel, b.vel, u),
     brake = (a.brake or 0) + ((b.brake or 0) - (a.brake or 0)) * u,
     steer = (a.steer or 0) + ((b.steer or 0) - (a.steer or 0)) * u,
