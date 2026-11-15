@@ -210,6 +210,27 @@ do
   check('playback keeps its place in the list', state.play_i == 4)
 end
 
+do
+  local state = logic.create()
+  logic.handle(state, logic.RECORD, two)
+  logic.capture(state, 14 * 60 - 1, pose(1, 0, 1))
+  check('before 14 minutes stays quiet', state.recording and state.notice == 'Recording')
+  logic.capture(state, 1, pose(1, 0, 1))
+  check('14 minutes says 60 seconds left', state.recording and state.notice == '60 seconds of recording left')
+  logic.capture(state, 1, pose(1, 0, 1))
+  check('one second later says 59', state.recording and state.notice == '59 seconds of recording left')
+  logic.capture(state, 58, pose(2, 0, 1))
+  check('the last second is singular', state.recording and state.notice == '1 second of recording left')
+  logic.capture(state, 2, pose(2, 0, 1))
+  check('15 minute limit stops the recording', not state.recording and #state.samples == 4)
+  check('15 minute limit tells the user', state.notice == '15 minute recording limit reached')
+  local stopped = logic.create()
+  logic.handle(stopped, logic.RECORD, two)
+  logic.capture(stopped, 0.1, pose(1, 0, 1))
+  logic.handle(stopped, logic.RECORD, two)
+  check('stopping yourself still says saved', stopped.notice == 'Lead run saved')
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)

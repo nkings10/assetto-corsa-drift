@@ -241,10 +241,17 @@ function M.capture(state, dt, pose)
   if dt < 0 then dt = 0 end
   if state.elapsed + dt > MAX_SECONDS then
     state.recording = false
-    state.notice = 'Lead run saved'
+    state.notice = '15 minute recording limit reached'
     return
   end
   state.elapsed = state.elapsed + dt
+  if state.elapsed >= MAX_SECONDS - 60 then
+    local left = math.ceil(MAX_SECONDS - state.elapsed - 1e-9)
+    if left < 1 then left = 1 end
+    local unit = 'seconds'
+    if left == 1 then unit = 'second' end
+    state.notice = left .. ' ' .. unit .. ' of recording left'
+  end
   local slot = math.floor(state.elapsed / SAMPLE_INTERVAL + 1e-9)
   if state.sample_slot ~= nil and slot <= state.sample_slot then
     return
