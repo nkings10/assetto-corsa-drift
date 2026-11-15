@@ -14,6 +14,7 @@ local function sibling(name)
 end
 
 local car_lights = sibling('car_lights.lua')
+local height = sibling('height.lua')
 local light_data = nil
 
 local node = nil
@@ -24,9 +25,8 @@ local car_folder = nil
 local status = 'idle'
 local was_hidden = true
 local ground_offset = 0.05
-local last_y = nil
 local ground_bias = 0
-local raycast_ok = nil
+local height_gap = nil
 local gfx_y = 0
 
 local wheel_mat = { nil, nil, nil, nil }
@@ -922,8 +922,14 @@ local function compute_ground_offset()
   end
 end
 
+local function fallback_drop()
+  local drop = ground_bias
+  if math.abs(drop) < 0.05 then drop = -0.95 + gfx_y end
+  return drop
+end
+
 local function get_ground_y(world_pos)
-  if raycast_ok == false or render == nil or render.createRay == nil then return nil end
+  if render == nil or render.createRay == nil then return nil end
   local from = vec3(world_pos.x, world_pos.y + 5, world_pos.z)
   local dir = vec3(0, -1, 0)
   local ok, dist = pcall(function()
@@ -931,7 +937,6 @@ local function get_ground_y(world_pos)
     return ray:track()
   end)
   if ok and dist ~= nil and dist >= 0 then
-    raycast_ok = true
     return from.y - dist
   end
   local ok2, dist2 = pcall(function()
@@ -939,34 +944,19 @@ local function get_ground_y(world_pos)
     return ray:physics(vec3(), vec3())
   end)
   if ok2 and dist2 ~= nil and dist2 >= 0 then
-    raycast_ok = true
     return from.y - dist2
   end
-  if raycast_ok == nil then raycast_ok = false end
   return nil
 end
 
-local function snap_y(recorded_y, world_xz, dt, speed_kmh)
-  local ground = get_ground_y(vec3(world_xz.x, recorded_y, world_xz.z))
-  local target
-  if ground ~= nil then
-    -- Seat the KN5 origin from the road, not from physics COM (that floated ~1 m).
-    target = ground + ground_offset
-  else
-    -- No raycast: drop from recorded COM toward visual ground height.
-    local drop = ground_bias
-    if math.abs(drop) < 0.05 then drop = -0.95 + gfx_y end
-    target = recorded_y + drop
+local function snap_y(recorded_y, world_xz)
+  local ground = nil
+  if height_gap == nil then
+    ground = get_ground_y(vec3(world_xz.x, recorded_y, world_xz.z))
   end
-  if was_hidden or last_y == nil then
-    last_y = target
-    return target
-  end
-  local max_delta = 0.12 * math.max(1, (speed_kmh or 0) / 80)
-  local delta = clamp(target - last_y, -max_delta, max_delta)
-  local smooth = (delta < 0) and 14 or 10
-  last_y = last_y + delta * math.min(1, dt * smooth)
-  return last_y
+  local y, gap = height.step(height_gap, recorded_y, ground, ground_offset, fallback_drop())
+  height_gap = gap
+  return y
 end
 
 local function update_wetness()
@@ -1156,7 +1146,7 @@ function M.ensure(car_id)
   compute_ground_offset()
   ready = true
   was_hidden = true
-  last_y = nil
+  height_gap = nil
   ground_bias = ground_offset
   status = 'ok ' .. tostring(path:match('[^/\\]+$') or path)
   return true
@@ -1174,7 +1164,6 @@ function M.hide()
   stop_sound()
   spin[1], spin[2], spin[3], spin[4] = 0, 0, 0, 0
   steer_smooth = 0
-  last_y = nil
   ground_bias = 0
   was_hidden = true
 end
@@ -1199,8 +1188,7 @@ function M.show(pose, dt)
   if side:length() < 0.001 then side = vec3(1, 0, 0) else side:normalize() end
 
   local raw = v3(pose.pos)
-  local speed = pose.speed or (speed_ms(pose.vel) * 3.6)
-  local y = snap_y(raw.y, raw, dt, speed)
+  local y = snap_y(raw.y, raw)
   local pos = vec3(raw.x, y, raw.z)
 
   node:setPosition(pos)

@@ -164,6 +164,24 @@ do
   )
 end
 
+local height = dofile('apps/lua/solo_tandems/height.lua')
+
+do
+  local gap = nil
+  local y
+  y, gap = height.step(gap, 6, 0, 0.05, -0.95)
+  check('a jump before a road reading keeps the saved height', math.abs(y - 5.05) < 1e-9 and gap == nil)
+  y, gap = height.step(gap, 1.0, nil, 0.05, -0.95)
+  check('a missed road keeps the guessed drop', math.abs(y - 0.05) < 1e-9 and gap == nil)
+  y, gap = height.step(gap, 1.0, 0, 0.05, -0.95)
+  check('a road reading stores the gap', gap ~= nil and math.abs(y - 0.05) < 1e-9)
+  local locked = gap
+  y, gap = height.step(gap, 4.0, 0, 0.05, -0.95)
+  check('a later jump keeps that gap', gap == locked and math.abs(y - (4.0 + locked)) < 1e-9 and math.abs((y - 0.05) - 3) < 1e-9)
+  local ignored, still = height.step(nil, 5, 0, 0.05, -0.95)
+  check('a high hit does not store a gap', still == nil and math.abs(ignored - 4.05) < 1e-9)
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
