@@ -16,6 +16,7 @@ end
 local car_lights = sibling('car_lights.lua')
 local wetness = sibling('wetness.lua')
 local height = sibling('height.lua')
+local wipers = sibling('wipers.lua')
 local light_data = nil
 
 local node = nil
@@ -47,6 +48,7 @@ local steer_orig = nil
 local wiper_nodes = {}
 local wiper_ksanim = nil
 local wiper_t = 0
+local wipers_moving = false
 
 local brake_meshes = nil
 local head_meshes = nil
@@ -403,20 +405,24 @@ local function apply_steer_wheel(angle)
   m.row3.x, m.row3.y, m.row3.z = orig.row3.x, orig.row3.y, orig.row3.z
 end
 
-local function update_wipers(dt)
-  wiper_t = wiper_t + dt * 1.2
-  local progress = math.abs(math.sin(wiper_t * math.pi))
+local function rain_intensity()
+  if ac.getSim == nil then return 0 end
+  local ok, sim = pcall(ac.getSim)
+  if not ok or sim == nil then return 0 end
+  return sim.rainIntensity or 0
+end
+
+local function apply_wiper_pose(progress, angle)
   if wiper_ksanim ~= nil and node ~= nil then
     pcall(function()
       node:setAnimation(wiper_ksanim, progress, true)
     end)
     return
   end
-  local angle = math.sin(wiper_t * math.pi * 2) * math.rad(55)
+  local cos_w, sin_w = math.cos(angle), math.sin(angle)
   for i = 1, #wiper_nodes do
     local w = wiper_nodes[i]
     local orig, m = w.orig, w.mat
-    local cos_w, sin_w = math.cos(angle), math.sin(angle)
     local ox1, oy1, oz1 = orig.row1.x, orig.row1.y, orig.row1.z
     local ox2, oy2, oz2 = orig.row2.x, orig.row2.y, orig.row2.z
     m.row1.x = ox1 * cos_w + ox2 * sin_w
@@ -427,6 +433,22 @@ local function update_wipers(dt)
     m.row2.z = -oz1 * sin_w + oz2 * cos_w
     m.row3.x, m.row3.y, m.row3.z = orig.row3.x, orig.row3.y, orig.row3.z
   end
+end
+
+local function update_wipers(dt)
+  if not wipers.active(rain_intensity()) then
+    if wipers_moving then
+      wipers_moving = false
+      wiper_t = 0
+      apply_wiper_pose(0, 0)
+    end
+    return
+  end
+  wipers_moving = true
+  wiper_t = wiper_t + dt * 1.2
+  local progress = math.abs(math.sin(wiper_t * math.pi))
+  local angle = math.sin(wiper_t * math.pi * 2) * math.rad(55)
+  apply_wiper_pose(progress, angle)
 end
 
 local function hide_light(light)
@@ -1184,6 +1206,8 @@ function M.ensure(car_id)
   ready = true
   was_hidden = true
   height_gap = nil
+  wiper_t = 0
+  wipers_moving = true
   ground_bias = ground_offset
   status = 'ok ' .. tostring(path:match('[^/\\]+$') or path)
   return true

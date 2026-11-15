@@ -306,6 +306,14 @@ do
   check('a high hit does not store a gap', still == nil and math.abs(ignored - 4.05) < 1e-9)
 end
 
+local wipers = dofile('apps/lua/solo_tandems/wipers.lua')
+
+do
+  check('dry track leaves the wipers parked', not wipers.active(0) and not wipers.active(0.01))
+  check('rain moves the wipers', wipers.active(0.02) and wipers.active(1))
+  check('a missing rain reading leaves the wipers parked', not wipers.active(nil) and not wipers.active('rain'))
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
