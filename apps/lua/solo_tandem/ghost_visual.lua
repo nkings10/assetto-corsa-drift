@@ -9,10 +9,11 @@ local loaded_id = nil
 local car_folder = nil
 local status = 'idle'
 local was_hidden = true
-local ground_offset = 0.33
+local ground_offset = 0.05
 local last_y = nil
 local ground_bias = 0
 local raycast_ok = nil
+local gfx_y = 0
 
 local wheel_mat = { nil, nil, nil, nil }
 local tyre_mat = { nil, nil, nil, nil }
@@ -20,6 +21,8 @@ local disc_mat = { nil, nil, nil, nil }
 local wheel_orig = { nil, nil, nil, nil }
 local tyre_orig = { nil, nil, nil, nil }
 local disc_orig = { nil, nil, nil, nil }
+local wheel_ref = { nil, nil, nil, nil }
+local tyre_ref = { nil, nil, nil, nil }
 local spin = { 0, 0, 0, 0 }
 local steer_smooth = 0
 
@@ -185,8 +188,8 @@ local function find_parts(root)
     { 'BRAKE_DISC_RR', 'DISC_RR', 'disk_rr', 'BRAKE_DISC_RR' },
   }
   for i = 1, 4 do
-    wheel_mat[i], wheel_orig[i] = cache_matrix(root, wheel_names[i])
-    tyre_mat[i], tyre_orig[i] = cache_matrix(root, tyre_names[i])
+    wheel_mat[i], wheel_orig[i], wheel_ref[i] = cache_matrix(root, wheel_names[i])
+    tyre_mat[i], tyre_orig[i], tyre_ref[i] = cache_matrix(root, tyre_names[i])
     disc_mat[i], disc_orig[i] = cache_matrix(root, disc_names[i])
   end
   steer_mat, steer_orig = cache_matrix(root, {
@@ -483,56 +486,72 @@ local function update_smoke(pose, look, side, pos, dt)
     if pose.vel then smoke_push.velocity = v3(pose.vel) end
   end
   local now = os.preciseClock and os.preciseClock() or smoke_clock + dt
-  if drift <= 5 or speed <= 12 or now - smoke_clock < 0.008 then
-    smoke_clock = math.max(smoke_clock, now - 1)
+  -- Tandem fires ~120 Hz with many bursts; keep a lighter stream for Solo Tandem.
+  if drift <= 8 or speed <= 20 or now - smoke_clock < 0.04 then
     return
   end
   smoke_clock = now
-  local intensity = clamp((drift - 5) / 35, 0, 1) * clamp((speed - 12) / 68, 0, 1)
-  local wheel_base, track_half, wheel_r = 1.35, 0.72, 0.33
+  local intensity = clamp((drift - 8) / 40, 0, 1) * clamp((speed - 20) / 80, 0, 1)
+  local wheel_base, track_half = 1.35, 0.72
   local vel = v3(pose.vel)
-  local kick = speed * 0.012 * intensity
+  local kick = speed * 0.008 * intensity
   local slip_sign = (pose.drift or 0) > 0 and -1 or 1
-  local corners = {
-    pos - look * wheel_base + side * track_half + vec3(0, 0.02, 0),
-    pos - look * wheel_base - side * track_half + vec3(0, 0.02, 0),
-  }
-  local amount = 0.8 + intensity * 3.5
-  for c = 1, 2 do
-    local contact = corners[c]
-    local center = contact + vec3(0, wheel_r, 0)
-    for _ = 1, 3 do
-      local angle = (math.random() - 0.5) * math.pi
-      local r = wheel_r * (0.7 + math.random() * 0.6)
-      local p = vec3(
-        center.x - look.x * math.cos(angle) * r + side.x * (math.random() - 0.5) * 0.4,
-        math.max(contact.y, center.y + math.sin(angle) * r),
-        center.z - look.z * math.cos(angle) * r + side.z * (math.random() - 0.5) * 0.4
-      )
-      local out = p - center
-      local olen = out:length() + 0.001
-      local force = 0.5 + intensity
-      local v = vec3(
-        vel.x * 0.35 - look.x * kick + side.x * slip_sign * speed * 0.006 + out.x / olen * force,
-        0.1 + math.random() * 0.2,
-        vel.z * 0.35 - look.z * kick + side.z * slip_sign * speed * 0.006 + out.z / olen * force
-      )
+  local amount = 0.25 + intensity * 0.9
+  for _, sign in ipairs({ -1, 1 }) do
+    local contact = pos - look * wheel_base + side * (track_half * sign) + vec3(0, 0.02, 0)
+    local v = vec3(
+      vel.x * 0.25 - look.x * kick + side.x * slip_sign * speed * 0.004,
+      0.05 + math.random() * 0.1,
+      vel.z * 0.25 - look.z * kick + side.z * slip_sign * speed * 0.004
+    )
+    pcall(function()
+      smoke_main:emit(contact, v, amount)
+    end)
+    if intensity > 0.55 and smoke_heavy ~= nil then
       pcall(function()
-        smoke_main:emit(p, v, amount * (0.7 + math.random() * 0.6))
+        smoke_heavy:emit(contact, v * 1.1, (intensity - 0.55) * 1.2)
       end)
     end
-    if intensity > 0.3 and smoke_heavy ~= nil then
-      local heavy = (intensity - 0.3) * 4
-      for _ = 1, 2 do
-        local p = center + side * ((math.random() - 0.5) * 0.5) - look * ((math.random() - 0.5) * 0.4)
-        p.y = math.max(contact.y, p.y)
-        local v = vel * 0.45 - look * (kick * 1.3) + side * (slip_sign * speed * 0.01)
-        v.y = 0.15 + math.random() * 0.25
-        pcall(function()
-          smoke_heavy:emit(p, v, heavy)
-        end)
+  end
+end
+
+local function compute_ground_offset()
+  if node == nil then
+    ground_offset = 0.05
+    return
+  end
+  pcall(function()
+    node:setPosition(vec3(0, 0, 0))
+    node:setOrientation(vec3(0, 0, 1), vec3(0, 1, 0))
+  end)
+  local sum, count = 0, 0
+  local radius = 0.33
+  for i = 1, 4 do
+    local ref = tyre_ref[i] or wheel_ref[i]
+    if ref ~= nil then
+      local ok, world_y = pcall(function()
+        local wm = ref:getWorldTransformationRaw()
+        if wm == nil then return nil end
+        if wm.row4 ~= nil then return wm.row4.y end
+        if wm.position ~= nil then return wm.position.y end
+        return nil
+      end)
+      if ok and world_y ~= nil then
+        sum = sum + (radius - world_y)
+        count = count + 1
       end
     end
+  end
+  pcall(function()
+    node:setPosition(vec3(0, -1000, 0))
+    if node.clearMotion then node:clearMotion() end
+  end)
+  if count > 0 then
+    ground_offset = sum / count
+  else
+    -- No wheel nodes: keep a tiny road offset; drop recorded COM when raycast misses.
+    ground_offset = 0.05
+    ground_bias = -0.95 + gfx_y
   end
 end
 
@@ -562,24 +581,23 @@ end
 
 local function snap_y(recorded_y, world_xz, dt, speed_kmh)
   local ground = get_ground_y(vec3(world_xz.x, recorded_y, world_xz.z))
-  local target = recorded_y
+  local target
   if ground ~= nil then
-    local snapped = ground + ground_offset
-    local diff = snapped - recorded_y
-    ground_bias = ground_bias + (diff - ground_bias) * math.min(1, dt * 4)
-    if math.abs(diff) < 0.15 then
-      target = recorded_y
-    else
-      target = recorded_y + ground_bias
-    end
+    -- Seat the KN5 origin from the road, not from physics COM (that floated ~1 m).
+    target = ground + ground_offset
+  else
+    -- No raycast: drop from recorded COM toward visual ground height.
+    local drop = ground_bias
+    if math.abs(drop) < 0.05 then drop = -0.95 + gfx_y end
+    target = recorded_y + drop
   end
   if was_hidden or last_y == nil then
     last_y = target
     return target
   end
-  local max_delta = 0.08 * math.max(1, (speed_kmh or 0) / 80)
+  local max_delta = 0.12 * math.max(1, (speed_kmh or 0) / 80)
   local delta = clamp(target - last_y, -max_delta, max_delta)
-  local smooth = (delta < 0) and 12 or 8
+  local smooth = (delta < 0) and 14 or 10
   last_y = last_y + delta * math.min(1, dt * smooth)
   return last_y
 end
@@ -753,13 +771,18 @@ function M.ensure(car_id)
   end)
   find_parts(node)
   find_meshes(node)
-  ground_offset = 0.33
-  pcall(function()
-    node:setPosition(vec3(0, -1000, 0))
-    if node.clearMotion then node:clearMotion() end
-  end)
+  gfx_y = 0
+  if ac.getCar ~= nil then
+    local ok_car, car = pcall(ac.getCar, 0)
+    if ok_car and car ~= nil and car.graphicsOffset ~= nil then
+      gfx_y = car.graphicsOffset.y or 0
+    end
+  end
+  compute_ground_offset()
   ready = true
   was_hidden = true
+  last_y = nil
+  ground_bias = ground_offset
   status = 'ok ' .. tostring(path:match('[^/\\]+$') or path)
   return true
 end
