@@ -27,25 +27,63 @@ local car_option_i = 1
 local run_name = 'run'
 local run_files = nil
 local run_pick = 1
-local run_folder_cached = nil
+local run_folder_edit = nil
 
-local function runs_folder()
-  if run_folder_cached ~= nil then return run_folder_cached end
-  local docs = nil
+local settings = nil
+if ac.storage ~= nil then
+  local ok, stored = pcall(ac.storage, { runsFolder = '' }, 'soloTandem.')
+  if ok then settings = stored end
+end
+
+local function documents_root()
   if ac.getFolder and ac.FolderID then
     if ac.FolderID.Documents then
-      docs = ac.getFolder(ac.FolderID.Documents)
-    elseif ac.FolderID.ACDocuments then
-      docs = ac.getFolder(ac.FolderID.ACDocuments)
+      local docs = ac.getFolder(ac.FolderID.Documents)
+      if type(docs) == 'string' and docs ~= '' then return docs end
+    end
+    if ac.FolderID.ACDocuments then
+      local docs = ac.getFolder(ac.FolderID.ACDocuments)
+      if type(docs) == 'string' and docs ~= '' then return docs end
     end
   end
-  if type(docs) ~= 'string' or docs == '' then
-    docs = ac.getFolder and ac.getFolder(ac.FolderID.ACApps) or 'apps/lua/solo_tandem'
-    run_folder_cached = docs .. '/lua/solo_tandem/runs'
-  else
-    run_folder_cached = docs .. '/lead_chase_runs'
+  return nil
+end
+
+local function default_runs_folder()
+  local docs = documents_root()
+  if docs ~= nil then
+    return docs .. '/Solo Tandems'
   end
-  return run_folder_cached
+  local apps = ac.getFolder and ac.FolderID and ac.getFolder(ac.FolderID.ACApps)
+  if type(apps) == 'string' and apps ~= '' then
+    return apps .. '/lua/solo_tandem/runs'
+  end
+  return 'Solo Tandems'
+end
+
+local function normalize_folder(path)
+  path = tostring(path or '')
+  path = path:gsub('\\', '/')
+  path = path:gsub('/+$', '')
+  return path
+end
+
+local function runs_folder()
+  local custom = settings and settings.runsFolder or ''
+  custom = normalize_folder(custom)
+  if custom ~= '' then return custom end
+  return normalize_folder(default_runs_folder())
+end
+
+local function set_runs_folder(path)
+  path = normalize_folder(path)
+  if path == '' then path = normalize_folder(default_runs_folder()) end
+  if settings ~= nil then
+    settings.runsFolder = path
+  end
+  run_folder_edit = path
+  run_files = nil
+  run_pick = 1
 end
 
 local function ensure_runs_folder()
@@ -549,6 +587,30 @@ function script.windowMain(dt)
 
   ui.separator()
   ui.text('Share run')
+  if run_folder_edit == nil then
+    run_folder_edit = runs_folder()
+  end
+  if ui.inputText ~= nil then
+    local ok, a, b = pcall(ui.inputText, 'Runs folder', run_folder_edit)
+    if ok then
+      if type(a) == 'string' then
+        run_folder_edit = a
+      elseif type(b) == 'string' then
+        run_folder_edit = b
+      end
+    end
+  end
+  if ui.button('Apply folder') then
+    set_runs_folder(run_folder_edit)
+    refresh_run_files()
+    state.notice = 'Runs folder set'
+  end
+  ui.sameLine(0, 8)
+  if ui.button('Default folder') then
+    set_runs_folder(default_runs_folder())
+    refresh_run_files()
+    state.notice = 'Runs folder reset'
+  end
   ui.text(runs_folder())
   if ui.inputText ~= nil then
     local ok, a, b = pcall(ui.inputText, 'Name', run_name)
