@@ -164,6 +164,42 @@ do
   )
 end
 
+do
+  local state = logic.create()
+  logic.handle(state, logic.RECORD, two)
+  local frame = 1 / 120
+  for _ = 1, 120 do
+    logic.capture(state, frame, pose(state.elapsed, 0, 8))
+  end
+  logic.handle(state, logic.RECORD, two)
+  check('120 fps keeps about 30 samples in one second', #state.samples == 31)
+  local spaced = #state.samples >= 3
+  for i = 3, #state.samples do
+    local gap = state.samples[i].t - state.samples[i - 1].t
+    if gap < (1 / 30) - 0.002 or gap > (1 / 30) + 0.002 then
+      spaced = false
+    end
+  end
+  check('samples stay 1/30 apart', spaced)
+  logic.handle(state, logic.SPAWN, two)
+  logic.handle(state, logic.START, two)
+  local mid
+  local guard = 0
+  repeat
+    mid = logic.lead_position(state, frame)
+    guard = guard + 1
+  until guard > 120 or (state.play_t > state.samples[4].t and state.play_t < state.samples[5].t)
+  local a = state.samples[4]
+  local b = state.samples[5]
+  local u = (state.play_t - a.t) / (b.t - a.t)
+  local expect = a.pos.x + (b.pos.x - a.pos.x) * u
+  check(
+    'playback blends between samples',
+    mid ~= nil and math.abs(mid.pos.x - expect) < 0.0001 and u > 0.01 and u < 0.99
+  )
+  check('playback keeps its place in the list', state.play_i == 4)
+end
+
 if failures > 0 then
   print(failures .. ' failed')
   os.exit(1)
