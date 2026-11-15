@@ -14,11 +14,13 @@ end
 
 local logic = dofile(app_file('logic.lua'))
 local lead_visual = dofile(app_file('lead_visual.lua'))
+local setup_slot = dofile(app_file('setup_slot.lua'))
 
 local state = logic.create()
 local deck = nil
 local deck_link = { seen = false, seq = 0 }
 local recorded_car_id = nil
+local setup_loaded = false
 local run_name = 'run'
 local run_files = nil
 local run_pick = 1
@@ -94,6 +96,34 @@ local function sanitize_name(name)
   name = name:gsub('[^%w%-%_]+', '_')
   if name == '' then name = 'run' end
   return name
+end
+
+local function file_exists(path)
+  if io == nil then return false end
+  if io.fileExists ~= nil then
+    return io.fileExists(path) == true
+  end
+  if io.load == nil then return false end
+  local ok, text = pcall(io.load, path)
+  return ok and type(text) == 'string'
+end
+
+local function setups_root()
+  if ac.getFolder == nil or ac.FolderID == nil or ac.FolderID.UserSetups == nil then
+    return nil
+  end
+  local ok, folder = pcall(ac.getFolder, ac.FolderID.UserSetups)
+  if ok and type(folder) == 'string' and folder ~= '' then
+    return normalize_folder(folder)
+  end
+  return nil
+end
+
+local function current_track_folder()
+  if ac.getTrackID == nil then return '' end
+  local ok, id = pcall(ac.getTrackID)
+  if ok and type(id) == 'string' then return id end
+  return ''
 end
 
 local function track_id()
@@ -263,6 +293,27 @@ local function player_car_id()
   return nil
 end
 
+local function load_saved_setup()
+  if setup_loaded or ac.loadSetup == nil then
+    setup_loaded = true
+    return
+  end
+  if ac.isCarResetAllowed ~= nil then
+    local ok, allowed = pcall(ac.isCarResetAllowed)
+    if not ok or allowed ~= true then return end
+  end
+  local car = player_car_id()
+  local root = setups_root()
+  if car == nil or root == nil then return end
+  local base = root .. '/' .. car .. '/'
+  local relative = setup_slot.relative(current_track_folder(), function(path)
+    return file_exists(base .. path)
+  end)
+  setup_loaded = true
+  if relative == nil then return end
+  pcall(ac.loadSetup, relative)
+end
+
 local function call(fn, ...)
   if fn == nil then return false end
   return pcall(fn, ...)
@@ -418,6 +469,7 @@ local function deck_action()
 end
 
 function script.update(dt)
+  load_saved_setup()
   deck_action()
   for i = 1, #buttons do
     local item = buttons[i]

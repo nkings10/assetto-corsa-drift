@@ -2,7 +2,7 @@
 
 Solo Tandems is a Practice mode and an in-game app. You drive one car. The lead is a model drawn in the world. It has no physics, so you can drive through it.
 
-The mode starts you in the pits, so the car setup is available and you can return to the pits the way Practice does. Extended physics is on. The pit crew is hidden. Yellow and blue flags are off. Lap-cut checks are turned off, so a chase line off the racing line does not count as a cut.
+The session starts in the pits. A setup saved as Solo Tandems for this car on this track is loaded. When that file is missing, the Solo Tandems setup saved for the car is loaded. When neither file exists, the car keeps the setup the game already loaded. Extended physics is on. The pit crew is hidden. Yellow and blue flags are off. Lap-cut checks are turned off, so a chase line off the racing line does not count as a cut.
 
 ## A session
 

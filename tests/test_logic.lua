@@ -423,6 +423,31 @@ do
   check('a missing light reading is off', dark.samples[1].lights.head == 0 and dark.samples[1].lights.blink == 0)
 end
 
+local setup_slot = dofile('apps/lua/solo_tandems/setup_slot.lua')
+
+do
+  local function has(files)
+    return function(path) return files[path] == true end
+  end
+  check(
+    'a track setup is used when it exists',
+    setup_slot.relative('spa', has({ ['spa/Solo Tandems.ini'] = true, ['generic/Solo Tandems.ini'] = true }))
+      == 'spa/Solo Tandems.ini'
+  )
+  check(
+    'a car setup is used when the track file is missing',
+    setup_slot.relative('spa', has({ ['generic/Solo Tandems.ini'] = true })) == 'generic/Solo Tandems.ini'
+  )
+  check(
+    'no setup is loaded when neither file exists',
+    setup_slot.relative('spa', has({})) == nil
+  )
+  check(
+    'a missing track still uses the car setup',
+    setup_slot.relative('', has({ ['generic/Solo Tandems.ini'] = true })) == 'generic/Solo Tandems.ini'
+  )
+end
+
 local model_notice = dofile('apps/lua/solo_tandems/model_notice.lua')
 
 do
