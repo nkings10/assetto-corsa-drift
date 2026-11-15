@@ -116,7 +116,7 @@ function M.create()
     placed = false,
     playing = false,
     play_t = 0,
-    chase_pose = nil,
+    chase_start = nil,
     pulse = nil,
     notice = 'Ready',
   }
@@ -174,7 +174,7 @@ function M.handle(state, action, ctx)
       return state
     end
     local pose = pose_copy(ctx.pose)
-    state.chase_pose = { pos = pose.pos, dir = pose.dir }
+    state.chase_start = { pos = pose.pos, dir = pose.dir }
     state.notice = 'Chase car set'
     return state
   end
@@ -207,7 +207,7 @@ function M.handle(state, action, ctx)
   end
 
   if action == M.TELEPORT then
-    if state.chase_pose == nil then
+    if state.chase_start == nil then
       state.notice = 'Set the chase car first'
       return state
     end
@@ -245,7 +245,7 @@ function M.capture(state, dt, pose)
   state.samples[#state.samples + 1] = sample
 end
 
-function M.lead_run_pose(state, dt)
+function M.lead_position(state, dt)
   if not state.placed or #state.samples == 0 then
     return nil, 'hidden'
   end

@@ -276,9 +276,9 @@ local function move_car(index, pose, speed)
 end
 
 local function teleport_player()
-  local chase_pose = state.chase_pose
-  if chase_pose == nil or physics == nil then return end
-  local pose = { pos = chase_pose.pos, dir = chase_pose.dir, vel = { x = 0, y = 0, z = 0 } }
+  local chase_start = state.chase_start
+  if chase_start == nil or physics == nil then return end
+  local pose = { pos = chase_start.pos, dir = chase_start.dir, vel = { x = 0, y = 0, z = 0 } }
   move_car(0, pose, pose.vel)
   call(physics.engageGear, 0, 0)
 end
@@ -497,7 +497,7 @@ function script.update(dt)
     logic.capture(state, dt, read_pose(car))
   end
 
-  local pose = logic.lead_run_pose(state, dt)
+  local pose = logic.lead_position(state, dt)
   if pose == nil then
     lead_visual.hide()
   else

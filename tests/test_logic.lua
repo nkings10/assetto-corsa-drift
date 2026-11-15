@@ -57,7 +57,7 @@ do
   logic.handle(state, logic.RECORD, two)
   logic.handle(state, logic.SPAWN, two)
   check('spawn places the lead car', state.placed and not state.playing)
-  local held = logic.lead_run_pose(state, 0.016)
+  local held = logic.lead_position(state, 0.016)
   check('waiting lead stays on the first sample', held.pos.x == state.samples[1].pos.x and held.vel.x == 0)
 end
 
@@ -69,13 +69,13 @@ do
   logic.handle(state, logic.RECORD, two)
   logic.handle(state, logic.SPAWN, two)
   logic.handle(state, logic.START, two)
-  local early = logic.lead_run_pose(state, 0)
+  local early = logic.lead_position(state, 0)
   check('playback holds the first moment', early.pos.x == 0 and state.playing)
   local mid
-  for _ = 1, 5 do mid = logic.lead_run_pose(state, 0.1) end
+  for _ = 1, 5 do mid = logic.lead_position(state, 0.1) end
   check('playback is halfway', math.abs(mid.pos.x - 5) < 0.001 and math.abs(mid.vel.x - 5) < 0.001)
   local done
-  for _ = 1, 5 do done = logic.lead_run_pose(state, 0.1) end
+  for _ = 1, 5 do done = logic.lead_position(state, 0.1) end
   check('playback returns lead to start', not state.playing and done.pos.x == 0 and done.vel.x == 0 and state.pulse == nil)
 end
 
@@ -85,10 +85,10 @@ do
   check('teleport needs chase car set', state.pulse == nil)
   logic.handle(state, logic.RECORD, two)
   logic.handle(state, logic.CHASE, two)
-  check('chase car can be set while recording', state.recording and state.chase_pose.pos.x == 1)
+  check('chase car can be set while recording', state.recording and state.chase_start.pos.x == 1)
   logic.handle(state, logic.CLEAR, two)
   logic.handle(state, logic.CHASE, two)
-  check('chase car pose is the car pose', state.chase_pose.pos.x == 1 and state.chase_pose.pos.z == 2)
+  check('chase start is the car pose', state.chase_start.pos.x == 1 and state.chase_start.pos.z == 2)
   logic.handle(state, logic.TELEPORT, two)
   check('teleport with no lead moves only the chase car', state.pulse == 'teleport' and not state.placed)
   logic.handle(state, logic.RECORD, two)
@@ -98,7 +98,7 @@ do
   logic.handle(state, logic.START, two)
   logic.handle(state, logic.TELEPORT, two)
   check('teleport resets a recorded lead', state.pulse == 'teleport' and state.placed and not state.playing)
-  local held = logic.lead_run_pose(state, 1)
+  local held = logic.lead_position(state, 1)
   check('reset lead is the first sample', held.pos.x == 4)
 end
 
@@ -129,12 +129,12 @@ do
   logic.capture(state, 1, pose(10, 0, 10, 1, { 5, 6, 7, 8 }, 0.5))
   logic.handle(state, logic.RECORD, two)
   logic.handle(state, logic.SPAWN, two)
-  local held = logic.lead_run_pose(state, 0)
+  local held = logic.lead_position(state, 0)
   check('waiting clears wheel spin and brake', held.brake == 0 and held.wheels[3] == 0)
   check('waiting keeps steer', held.steer == -0.5)
   logic.handle(state, logic.START, two)
   local mid
-  for _ = 1, 5 do mid = logic.lead_run_pose(state, 0.1) end
+  for _ = 1, 5 do mid = logic.lead_position(state, 0.1) end
   check('playback blends brake', math.abs(mid.brake - 0.5) < 0.001)
   check('playback blends rear wheel speed', math.abs(mid.wheels[3] - 5) < 0.001)
   check('playback blends steer', math.abs(mid.steer - 0) < 0.001)
