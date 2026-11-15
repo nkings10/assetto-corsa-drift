@@ -1,5 +1,6 @@
 -- Record a lead run and play it on the second car. The player is the chase car.
 -- Custom Shaders Patch 0.2.11. The lead is moved every frame, so a hit does not knock it off the line.
+-- Wheel spin and steer are drawn on WHEEL_* nodes in draw3D; physics teleport clears physics wheel state.
 
 local function app_file(name)
   local folder = 'apps/lua/lead_chase/'
@@ -17,9 +18,16 @@ local logic = dofile(app_file('logic.lua'))
 local state = logic.create()
 local deck_seq = 0
 local deck = nil
-local visual = nil
-local visual_worker = false
-local visual_status = 'off'
+
+local visual = {
+  shown = false,
+  steer = 0,
+  omega = { 0, 0, 0, 0 },
+  spin = { 0, 0, 0, 0 },
+  last_t = nil,
+  nodes = nil,
+  node_ok = false,
+}
 
 local ACTIONS = {
   [1] = logic.RECORD,
@@ -157,79 +165,16 @@ local function wheel_values(wheels, vel)
   return values
 end
 
-local function ensure_visual()
-  if visual ~= nil or ac.connect == nil or ac.StructItem == nil then return end
-  local ok, link = pcall(ac.connect, {
-    ac.StructItem.key('leadChase.visual.v1'),
-    active = ac.StructItem.int32(),
-    steer = ac.StructItem.float(),
-    w0 = ac.StructItem.float(),
-    w1 = ac.StructItem.float(),
-    w2 = ac.StructItem.float(),
-    w3 = ac.StructItem.float(),
-  })
-  if ok then visual = link end
-end
-
-local function start_visual_worker()
-  if visual_worker or physics == nil or physics.startPhysicsWorker == nil then
-    if physics == nil or physics.startPhysicsWorker == nil then
-      visual_status = 'no worker api'
-    end
-    return
-  end
-  ensure_visual()
-  if visual == nil then
-    visual_status = 'no shared state'
-    return
-  end
-  local ok, err = pcall(physics.startPhysicsWorker, 'lead_visual', 0, function(e)
-    visual_status = e and ('err ' .. tostring(e)) or 'stopped'
-    visual_worker = false
-  end)
-  if ok then
-    visual_worker = true
-    visual_status = 'on'
-  else
-    visual_status = 'fail ' .. tostring(err)
-  end
-end
-
-local function publish_visual(active, steer, wheels)
-  ensure_visual()
-  start_visual_worker()
-  if visual == nil then return end
-  visual.active = active and 1 or 0
-  visual.steer = steer or 0
-  local w = wheels or { 0, 0, 0, 0 }
-  visual.w0 = w[1] or 0
-  visual.w1 = w[2] or 0
-  visual.w2 = w[3] or 0
-  visual.w3 = w[4] or 0
-end
-
-local function apply_wheel_spin(index, values)
-  if physics == nil then return end
-  local all = 60
-  local avg = ((values[1] or 0) + (values[2] or 0) + (values[3] or 0) + (values[4] or 0)) * 0.25
-  if physics.setWheelAngularVelocity ~= nil then
-    for i = 0, 3 do
-      call(physics.setWheelAngularVelocity, index, i, values[i + 1] or 0)
-    end
-    call(physics.setWheelAngularVelocity, index, all, avg)
-  end
-  if physics.addWheelTorque ~= nil then
-    for i = 0, 3 do
-      call(physics.addWheelTorque, index, i, (values[i + 1] or 0) * 0.08)
-    end
-  end
-end
-
-local function set_brake_lights(on)
-  if ac.setTargetCar == nil or ac.setBrakingLightsThreshold == nil then return end
+local function set_lead_lights(braking)
+  if ac.setTargetCar == nil then return end
   call(ac.setTargetCar, 1)
-  -- Default threshold is ~0.01; AI often holds brake, which keeps lights on.
-  call(ac.setBrakingLightsThreshold, on and 0.01 or 10)
+  if ac.setTurningLights ~= nil and ac.TurningLights ~= nil then
+    call(ac.setTurningLights, ac.TurningLights.None)
+  end
+  if ac.setBrakingLightsThreshold ~= nil then
+    -- Default threshold is ~0.01; AI often holds brake, which keeps lights on.
+    call(ac.setBrakingLightsThreshold, braking and 0.01 or 10)
+  end
   call(ac.setTargetCar, 0)
 end
 
@@ -245,10 +190,56 @@ local function apply_brake_pedal(index, brake)
   controls.steer = math.huge
 end
 
-local function apply_steer(steer)
-  if physics ~= nil and physics.overrideSteering ~= nil then
-    call(physics.overrideSteering, 1, steer or 0)
+local function set_visual(pose)
+  if pose == nil then
+    visual.shown = false
+    visual.omega = { 0, 0, 0, 0 }
+    return
   end
+  visual.shown = true
+  visual.steer = pose.steer or 0
+  visual.omega = wheel_values(pose.wheels, pose.vel)
+end
+
+local function ensure_wheel_nodes()
+  if visual.nodes ~= nil then return visual.node_ok end
+  if ac.findNodes == nil then
+    visual.nodes = false
+    visual.node_ok = false
+    return false
+  end
+  local ok, root = pcall(ac.findNodes, 'carRoot:1')
+  if not ok or root == nil then
+    visual.nodes = false
+    visual.node_ok = false
+    return false
+  end
+  local names = { 'WHEEL_LF', 'WHEEL_RF', 'WHEEL_LR', 'WHEEL_RR' }
+  local nodes = {}
+  for i = 1, 4 do
+    local found, node = pcall(function()
+      return root:findNodes(names[i])
+    end)
+    nodes[i] = found and node or nil
+  end
+  visual.nodes = nodes
+  visual.node_ok = nodes[1] ~= nil and nodes[3] ~= nil
+  return visual.node_ok
+end
+
+local function apply_wheel_node(node, spin, steer)
+  if node == nil or node.getTransformationRaw == nil then return false end
+  local ok, raw = pcall(function()
+    return node:getTransformationRaw()
+  end)
+  if not ok or raw == nil or raw.position == nil then return false end
+  local p = raw.position
+  local rot = mat4x4.rotation(steer, vec3(0, 1, 0)):mul(mat4x4.rotation(spin, vec3(1, 0, 0)))
+  local mat = mat4x4.translation(vec3(p.x, p.y, p.z)):mul(rot)
+  pcall(function()
+    raw:set(mat)
+  end)
+  return true
 end
 
 local function park_lead()
@@ -262,13 +253,8 @@ local function park_lead()
   else
     call(physics.setCarPosition, 1, vec3(0, -500, 0), vec3(0, 0, 1))
   end
-  publish_visual(false, 0, { 0, 0, 0, 0 })
-  set_brake_lights(false)
-  if physics.overrideSteering ~= nil then
-    local nan = math.nan
-    if nan == nil then nan = 0 / 0 end
-    call(physics.overrideSteering, 1, nan)
-  end
+  set_visual(nil)
+  set_lead_lights(false)
 end
 
 local function show_lead(pose)
@@ -277,13 +263,9 @@ local function show_lead(pose)
   call(physics.setAILevel, 1, 0)
   call(physics.setAINoInput, 1, true, false)
   move_car(1, pose, pose.vel)
-  local wheels = wheel_values(pose.wheels, pose.vel)
-  apply_wheel_spin(1, wheels)
-  apply_steer(pose.steer)
-  publish_visual(true, pose.steer, wheels)
+  set_visual(pose)
   local braking = (pose.brake or 0) > 0.05
-  set_brake_lights(braking)
-  -- Only push the pedal when lights should be on. Leaving override off lets threshold hide AI brake.
+  set_lead_lights(braking)
   if braking then
     apply_brake_pedal(1, pose.brake)
   end
@@ -367,6 +349,32 @@ function script.update(dt)
   end
 end
 
+function script.draw3D(dt)
+  if not visual.shown then return end
+  if not ensure_wheel_nodes() then return end
+
+  local now = os.preciseClock and os.preciseClock() or nil
+  local step = dt
+  if step == nil or step <= 0 then
+    if visual.last_t ~= nil and now ~= nil then
+      step = now - visual.last_t
+    else
+      step = 0.016
+    end
+  end
+  if now ~= nil then visual.last_t = now end
+  if step > 0.1 then step = 0.1 end
+  if step < 0 then step = 0 end
+
+  -- Recorded steer is -1..1; ~0.55 rad is a usable road-car visual lock.
+  local steer_rad = (visual.steer or 0) * 0.55
+  for i = 1, 4 do
+    visual.spin[i] = visual.spin[i] + (visual.omega[i] or 0) * step
+    local steer = (i <= 2) and steer_rad or 0
+    apply_wheel_node(visual.nodes[i], visual.spin[i], steer)
+  end
+end
+
 function script.windowMain(dt)
   ui.text(state.notice)
   ui.text(state.recording and 'Recording' or 'Not recording')
@@ -379,20 +387,16 @@ function script.windowMain(dt)
   ui.text(state.spot and 'Chase spot saved' or 'No chase spot')
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off')
   ui.text('Cars: ' .. tostring(car_count()))
-  ui.text('Visual worker: ' .. visual_status)
+  ui.text(visual.node_ok and 'Wheel nodes: ok' or 'Wheel nodes: missing')
+  ui.text(string.format('Visual steer %.2f  RL omega %.1f', visual.steer or 0, visual.omega[3] or 0))
   if ac.getCar ~= nil then
     local ok, lead = pcall(ac.getCar, 1)
     if ok and lead ~= nil then
-      local omega = 0
-      if lead.wheels ~= nil and lead.wheels[2] ~= nil then
-        omega = lead.wheels[2].angularSpeed or 0
-      end
       ui.text(string.format(
-        'Lead brake %.2f  lights %s  RL omega %.1f  steer %.2f',
+        'Lead brake %.2f  lights %s  signals %s',
         lead.brake or -1,
         tostring(lead.brakeLightsActive),
-        omega,
-        lead.steer and lead.steerLock and (lead.steer / lead.steerLock) or 0
+        tostring(lead.turningLeftLights or lead.turningRightLights or false)
       ))
     end
   end
