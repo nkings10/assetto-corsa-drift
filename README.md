@@ -2,7 +2,7 @@
 
 One-car Practice with extended physics. The lead car is visual only.
 
-Open the Solo Tandems app, record a lead run or import a .lead file, pick the lead car if you want, Spawn, set the chase car, then Start.
+Open the Solo Tandems app, record a lead run or import a .lead file, Spawn, set the chase car, then Start. The lead stays the car the run was recorded in.
 
 Keyboard and controller bindings are listed in Content Manager with the patch controls, under Solo Tandems. They appear after you start a session once. You do not need to drive. Before that first session, the list is empty.
 

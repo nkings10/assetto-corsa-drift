@@ -19,11 +19,6 @@ local state = logic.create()
 local deck = nil
 local deck_link = { seen = false, seq = 0 }
 local recorded_car_id = nil
-local lead_override = nil
-local all_cars = nil
-local car_search = ''
-local car_options = nil
-local car_option_i = 1
 local run_name = 'run'
 local run_files = nil
 local run_pick = 1
@@ -291,82 +286,12 @@ local function teleport_player()
   call(physics.engageGear, 0, 0)
 end
 
-local function refresh_car_list()
-  all_cars = {}
-  if ac.getFolder == nil or ac.FolderID == nil or ac.FolderID.ContentCars == nil then return end
-  local folder = ac.getFolder(ac.FolderID.ContentCars)
-  if type(folder) ~= 'string' or folder == '' or io == nil or io.scanDir == nil then return end
-  local dirs = io.scanDir(folder, '*')
-  if dirs == nil then return end
-  for i = 1, #dirs do
-    local name = dirs[i]
-    if type(name) == 'string' and name ~= '' then
-      local path = folder .. '/' .. name
-      local is_dir = true
-      if io.dirExists ~= nil then
-        is_dir = io.dirExists(path) == true
-      end
-      if is_dir then
-        all_cars[#all_cars + 1] = name
-      end
-    end
-  end
-  table.sort(all_cars)
-end
-
-local function rebuild_car_options()
-  if all_cars == nil then refresh_car_list() end
-  car_options = {}
-  local recorded = recorded_car_id or player_car_id() or '?'
-  car_options[1] = { id = nil, label = 'Same as recorded (' .. tostring(recorded) .. ')' }
-  local q = tostring(car_search or ''):lower()
-  if all_cars ~= nil then
-    for i = 1, #all_cars do
-      local id = all_cars[i]
-      if q == '' or id:lower():find(q, 1, true) then
-        car_options[#car_options + 1] = { id = id, label = id }
-      end
-    end
-  end
-  if car_option_i < 1 then car_option_i = 1 end
-  if car_option_i > #car_options then car_option_i = #car_options end
-end
-
-local function sync_car_option_index()
-  if car_options == nil then rebuild_car_options() end
-  if lead_override == nil or lead_override == '' then
-    car_option_i = 1
-    return
-  end
-  for i = 2, #car_options do
-    if car_options[i].id == lead_override then
-      car_option_i = i
-      return
-    end
-  end
-  car_option_i = 1
-end
-
-local function effective_lead_id()
-  if lead_override ~= nil and lead_override ~= '' then
-    return lead_override
-  end
+local function lead_car_id()
   return recorded_car_id or player_car_id()
 end
 
-local function apply_car_option()
-  if car_options == nil or car_options[car_option_i] == nil then return end
-  local picked = car_options[car_option_i]
-  local before = effective_lead_id()
-  lead_override = picked.id
-  local after = effective_lead_id()
-  if after ~= nil and after ~= before and state.placed then
-    lead_visual.ensure(after)
-  end
-end
-
 local function ensure_lead()
-  local id = effective_lead_id()
+  local id = lead_car_id()
   if id == nil then return false end
   if recorded_car_id == nil then recorded_car_id = id end
   return lead_visual.ensure(id)
@@ -441,8 +366,6 @@ local function import_run()
   if meta.carId ~= nil and meta.carId ~= '' then
     recorded_car_id = meta.carId
   end
-  lead_override = nil
-  car_options = nil
   lead_visual.hide()
   state.notice = 'Imported ' .. name
 end
@@ -455,8 +378,6 @@ local function press(action)
   end
   if action == logic.RECORD and state.recording then
     recorded_car_id = player_car_id()
-    lead_override = nil
-    car_options = nil
   end
   if action == logic.CLEAR or (action == logic.RECORD and state.recording) then
     lead_visual.hide()
@@ -530,56 +451,7 @@ function script.windowMain(dt)
   end
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off (teleport only)')
   ui.text('Lead: ' .. tostring(lead_visual.status()))
-  ui.text('Lead car: ' .. tostring(effective_lead_id() or 'none'))
-  if recorded_car_id ~= nil then
-    ui.text('Recorded car: ' .. recorded_car_id)
-  end
-
-  ui.separator()
-  ui.text('Lead car')
-  if ui.inputText ~= nil then
-    local ok, a, b = pcall(ui.inputText, 'Filter', car_search)
-    if ok then
-      local next_search = car_search
-      if type(a) == 'string' then
-        next_search = a
-      elseif type(b) == 'string' then
-        next_search = b
-      end
-      if next_search ~= car_search then
-        car_search = next_search
-        rebuild_car_options()
-        sync_car_option_index()
-      end
-    end
-  end
-  if car_options == nil then
-    rebuild_car_options()
-    sync_car_option_index()
-  end
-  if car_options ~= nil and #car_options > 0 then
-    local preview = car_options[car_option_i] and car_options[car_option_i].label or 'Lead car'
-    local flags = nil
-    if ui.ComboFlags ~= nil and ui.ComboFlags.HeightLarge ~= nil then
-      flags = ui.ComboFlags.HeightLarge
-    end
-    local function draw_car_combo()
-      for i = 1, #car_options do
-        local opt = car_options[i]
-        if ui.selectable(opt.label, i == car_option_i) then
-          if i ~= car_option_i then
-            car_option_i = i
-            apply_car_option()
-          end
-        end
-      end
-    end
-    if flags ~= nil then
-      pcall(ui.combo, '##lead_car', preview, flags, draw_car_combo)
-    else
-      pcall(ui.combo, '##lead_car', preview, draw_car_combo)
-    end
-  end
+  ui.text('Lead car: ' .. tostring(lead_car_id() or 'none'))
 
   ui.separator()
   if ui.button('Record') then press(logic.RECORD) end

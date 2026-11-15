@@ -28,7 +28,7 @@ Spawn, Start, and Teleport do nothing while a recording is still going. The noti
 
 ## The lead car
 
-The model is the car you recorded, unless you pick another from the cars installed in the game. The list can be filtered. The first choice is the recorded car. Picking a different car while the lead is showing unloads the old model and loads the new one.
+The model is the car the run was recorded in. Loading that run later keeps that car, whichever car you are driving.
 
 The wheels and the steering wheel follow the recording. The steering wheel uses that car's own steering lock. The tyre size comes from that car too, and it is used for the wheel spin, the smoke, and the ride height. The brake lights follow the brake. The headlights, high beams, and tail lights follow the recording. A high-beam flash lights the headlights without the tail lights. The blinkers follow the recorded side, and whether that blink was lit. The reverse lights come on when the recorded gear is reverse. Tyre smoke appears at the rear wheels when the saved run is sliding more than 5 degrees and moving faster than 12 km/h. If the model has no rear wheel to measure, the smoke sits a fixed distance behind the car. The wipers follow the recorded sweep. While the track is wet, the paint and the tyres are made to look wet. When it dries, each part goes back to the shine it had before the rain. If that shine could not be read, the body gets a plain dry shine. The lead plays that car's engine sound from the saved rpm and throttle.
 
