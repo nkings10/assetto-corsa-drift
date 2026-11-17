@@ -299,38 +299,23 @@ do
 
   local state = nil
   local y
-  y, state = height.step(state, 6, 0, 0.9)
-  check('a jump before a road reading keeps the saved height', math.abs(y - 6) < 1e-9 and state.gap == nil)
-  y, state = height.step(state, 1.0, nil, 0.9)
-  check('a missed road keeps the saved height', math.abs(y - 1.0) < 1e-9 and state.gap == nil)
-  y, state = height.step(state, 1.0, -1.2, 0.9)
-  check('a hit under the map does not move the car', math.abs(y - 1.0) < 1e-9 and state.gap == nil)
-  y, state = height.step(state, 1.0, 0.1, 0.9)
-  check('one road reading seats the car without locking', state.gap == nil and math.abs(y - 1.0) < 1e-9)
-  local seated = nil
-  local sat
-  sat, seated = height.step(seated, 1.0, 0.4, 0.5)
-  check('the first road reading puts the tyres on the road', seated.gap == nil and math.abs(sat - 0.9) < 1e-9)
-  sat, seated = height.step(seated, 1.2, nil, 0.5)
-  check('the next point keeps that tyre height', seated.gap == nil and math.abs(sat - 1.1) < 1e-9)
-  for _ = 1, 4 do
-    y, state = height.step(state, 1.0, 0.1, 0.9)
+  -- Saved point 10, road contact wants 9.95. Six centimetres is a slope, not a correction.
+  y, state = height.step(state, 10, 9.2, 0.75, 0.016, 40)
+  check('a small slope keeps the saved height', math.abs(y - 10) < 1e-9)
+  for _ = 1, 60 do
+    y, state = height.step(state, 10.4, 9.6, 0.75, 0.016, 50)
   end
-  check('agreeing road readings lock the gap', state.gap ~= nil and math.abs(state.gap) < 1e-9 and math.abs(y - 1.0) < 1e-9)
-  local locked = state.gap
-  y, state = height.step(state, 4.0, -2, 0.9)
-  check('a later jump keeps that gap', state.gap == locked and math.abs(y - 4.0) < 1e-9)
-  local fresh = nil
-  local ignored, still = height.step(fresh, 5, 0, 0.9)
-  check('a high hit does not store a gap', still.gap == nil and math.abs(ignored - 5) < 1e-9)
-  local com = nil
-  local cy
-  cy, com = height.step(com, 10.9, 10.0, 0.15)
-  check('a high saved point still seats the tyres', com.gap == nil and math.abs(cy - 10.15) < 1e-9)
-  local sunk = nil
-  local sy
-  sy, sunk = height.step(sunk, 10.9, 8.4, 0.15)
-  check('a surface under the road is not the road', sunk.gap == nil and #sunk.samples == 0 and math.abs(sy - 10.9) < 1e-9)
+  check('a changing slope stays on the saved height', math.abs(y - 10.4) < 1e-4)
+  y, state = height.step(nil, 6, nil, 0.9, 0.016, 0)
+  check('a missed road keeps the saved height', math.abs(y - 6) < 1e-9)
+  local air = nil
+  y, air = height.step(air, 10, 9.2, 0.75, 0.016, 40)
+  y, air = height.step(air, 12, 9.2, 0.75, 0.016, 80)
+  check('a jump does not drop to the road in one frame', y > 10 and y < 10.2)
+  local low = nil
+  y, low = height.step(low, 10, 9.2, 0.75, 0.016, 40)
+  y, low = height.step(low, 10, 7, 0.75, 0.016, 40)
+  check('a hit under the map does not drop the car in one frame', y > 9.5)
 end
 
 local wipers = dofile('apps/lua/solo_tandems/wipers.lua')
