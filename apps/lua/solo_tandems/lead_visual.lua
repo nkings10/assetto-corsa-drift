@@ -34,10 +34,8 @@ local car_spec = {
 }
 local status = 'idle'
 local was_hidden = true
-local ground_offset = 0.05
-local ground_bias = 0
-local height_gap = nil
-local gfx_y = 0
+local ground_offset = nil
+local height_state = nil
 
 local wheel_mat = { nil, nil, nil, nil }
 local tyre_mat = { nil, nil, nil, nil }
@@ -936,30 +934,38 @@ local function update_smoke(pose, look, side, pos, dt)
   end
 end
 
+local function world_y(ref)
+  if ref == nil or ref.getWorldTransformationRaw == nil then return nil end
+  local ok, y = pcall(function()
+    local wm = ref:getWorldTransformationRaw()
+    if wm == nil then return nil end
+    if wm.row4 ~= nil and type(wm.row4.y) == 'number' then return wm.row4.y end
+    if wm.position ~= nil and type(wm.position.y) == 'number' then return wm.position.y end
+    return nil
+  end)
+  if ok and type(y) == 'number' then return y end
+  return nil
+end
+
 local function compute_ground_offset()
-  if node == nil then
-    ground_offset = 0.05
-    return
-  end
+  ground_offset = nil
+  if node == nil then return end
   pcall(function()
     node:setPosition(vec3(0, 0, 0))
     node:setOrientation(vec3(0, 0, 1), vec3(0, 1, 0))
   end)
-  local sum, count = 0, 0
+  local root_y = world_y(node) or 0
+  local front, rear = {}, {}
   for i = 1, 4 do
-    local radius = i <= 2 and car_spec.radius_front or car_spec.radius_rear
-    local ref = tyre_ref[i] or wheel_ref[i]
-    if ref ~= nil then
-      local ok, world_y = pcall(function()
-        local wm = ref:getWorldTransformationRaw()
-        if wm == nil then return nil end
-        if wm.row4 ~= nil then return wm.row4.y end
-        if wm.position ~= nil then return wm.position.y end
-        return nil
-      end)
-      if ok and world_y ~= nil then
-        sum = sum + (radius - world_y)
-        count = count + 1
+    -- The wheel hub is the tyre centre. A tyre mesh pivot often sits higher, which buried the rubber.
+    local ref = wheel_ref[i] or tyre_ref[i]
+    local hub_y = world_y(ref)
+    if hub_y ~= nil then
+      local radius = i <= 2 and car_spec.radius_front or car_spec.radius_rear
+      local offset = height.hub_offset(radius, hub_y, root_y)
+      if offset ~= nil then
+        local axle = i <= 2 and front or rear
+        axle[#axle + 1] = offset
       end
     end
   end
@@ -967,49 +973,42 @@ local function compute_ground_offset()
     node:setPosition(vec3(0, -1000, 0))
     if node.clearMotion then node:clearMotion() end
   end)
-  if count > 0 then
-    ground_offset = sum / count
-  else
-    -- No wheel nodes: keep a tiny road offset; drop recorded COM when raycast misses.
-    ground_offset = 0.05
-    ground_bias = -0.95 + gfx_y
+  ground_offset = height.ride_offset(front, rear)
+end
+
+local function ray_distance(from, dir, length)
+  if physics ~= nil and physics.raycastTrack ~= nil then
+    local ok, dist = pcall(physics.raycastTrack, from, dir, length)
+    if ok and type(dist) == 'number' and dist > 0.05 and dist < length - 0.05 then
+      return dist
+    end
   end
-end
-
-local function fallback_drop()
-  local drop = ground_bias
-  if math.abs(drop) < 0.05 then drop = -0.95 + gfx_y end
-  return drop
-end
-
-local function get_ground_y(world_pos)
   if render == nil or render.createRay == nil then return nil end
-  local from = vec3(world_pos.x, world_pos.y + 5, world_pos.z)
-  local dir = vec3(0, -1, 0)
   local ok, dist = pcall(function()
-    local ray = render.createRay(from, dir, 20)
+    local ray = render.createRay(from, dir, length)
+    if ray == nil or ray.track == nil then return nil end
     return ray:track()
   end)
-  if ok and dist ~= nil and dist >= 0 then
-    return from.y - dist
-  end
-  local ok2, dist2 = pcall(function()
-    local ray = render.createRay(from, dir, 20)
-    return ray:physics(vec3(), vec3())
-  end)
-  if ok2 and dist2 ~= nil and dist2 >= 0 then
-    return from.y - dist2
+  if ok and type(dist) == 'number' and dist > 0.05 and dist < length - 0.05 then
+    return dist
   end
   return nil
 end
 
+local function get_ground_y(world_pos)
+  local from = vec3(world_pos.x, world_pos.y + 5, world_pos.z)
+  local dist = ray_distance(from, vec3(0, -1, 0), 30)
+  if dist == nil then return nil end
+  return from.y - dist
+end
+
 local function snap_y(recorded_y, world_xz)
   local ground = nil
-  if height_gap == nil then
+  if height_state == nil or height_state.gap == nil then
     ground = get_ground_y(vec3(world_xz.x, recorded_y, world_xz.z))
   end
-  local y, gap = height.step(height_gap, recorded_y, ground, ground_offset, fallback_drop())
-  height_gap = gap
+  local y, state = height.step(height_state, recorded_y, ground, ground_offset)
+  height_state = state
   return y
 end
 
@@ -1238,18 +1237,10 @@ function M.ensure(car_id)
   set_emissive(head_meshes, false, 0, 0)
   set_emissive(tail_meshes, false, 0, 0)
   set_emissive(brake_meshes, false, 0, 0)
-  gfx_y = 0
-  if ac.getCar ~= nil then
-    local ok_car, car = pcall(ac.getCar, 0)
-    if ok_car and car ~= nil and car.graphicsOffset ~= nil then
-      gfx_y = car.graphicsOffset.y or 0
-    end
-  end
   compute_ground_offset()
   ready = true
   was_hidden = true
-  height_gap = nil
-  ground_bias = ground_offset
+  height_state = nil
   status = 'ok ' .. tostring(path:match('[^/\\]+$') or path)
   return true
 end
@@ -1303,7 +1294,7 @@ function M.hide()
   stop_sound()
   spin[1], spin[2], spin[3], spin[4] = 0, 0, 0, 0
   steer_smooth = 0
-  ground_bias = 0
+  height_state = nil
   was_hidden = true
 end
 

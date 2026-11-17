@@ -291,19 +291,46 @@ end
 local height = dofile('apps/lua/solo_tandems/height.lua')
 
 do
-  local gap = nil
+  check('a hub gives the height of the model origin', math.abs(height.hub_offset(0.34, 10.2, 10) - 0.14) < 1e-9)
+  check('a hub far from the model is ignored', height.hub_offset(0.33, -1000, 0) == nil)
+  check('the lower axle sets the ride height', math.abs(height.ride_offset({ 0.40, 0.42 }, { 0.50, 0.48 }) - 0.49) < 1e-9)
+  check('one axle is enough for the ride height', math.abs(height.ride_offset({}, { 0.47 }) - 0.47) < 1e-9)
+  check('no hubs leaves the ride unset', height.ride_offset({}, {}) == nil)
+
+  local state = nil
   local y
-  y, gap = height.step(gap, 6, 0, 0.05, -0.95)
-  check('a jump before a road reading keeps the saved height', math.abs(y - 5.05) < 1e-9 and gap == nil)
-  y, gap = height.step(gap, 1.0, nil, 0.05, -0.95)
-  check('a missed road keeps the guessed drop', math.abs(y - 0.05) < 1e-9 and gap == nil)
-  y, gap = height.step(gap, 1.0, 0, 0.05, -0.95)
-  check('a road reading stores the gap', gap ~= nil and math.abs(y - 0.05) < 1e-9)
-  local locked = gap
-  y, gap = height.step(gap, 4.0, 0, 0.05, -0.95)
-  check('a later jump keeps that gap', gap == locked and math.abs(y - (4.0 + locked)) < 1e-9 and math.abs((y - 0.05) - 3) < 1e-9)
-  local ignored, still = height.step(nil, 5, 0, 0.05, -0.95)
-  check('a high hit does not store a gap', still == nil and math.abs(ignored - 4.05) < 1e-9)
+  y, state = height.step(state, 6, 0, 0.9)
+  check('a jump before a road reading keeps the saved height', math.abs(y - 6) < 1e-9 and state.gap == nil)
+  y, state = height.step(state, 1.0, nil, 0.9)
+  check('a missed road keeps the saved height', math.abs(y - 1.0) < 1e-9 and state.gap == nil)
+  y, state = height.step(state, 1.0, -1.2, 0.9)
+  check('a hit under the map does not move the car', math.abs(y - 1.0) < 1e-9 and state.gap == nil)
+  y, state = height.step(state, 1.0, 0.1, 0.9)
+  check('one road reading seats the car without locking', state.gap == nil and math.abs(y - 1.0) < 1e-9)
+  local seated = nil
+  local sat
+  sat, seated = height.step(seated, 1.0, 0.4, 0.5)
+  check('the first road reading puts the tyres on the road', seated.gap == nil and math.abs(sat - 0.9) < 1e-9)
+  sat, seated = height.step(seated, 1.2, nil, 0.5)
+  check('the next point keeps that tyre height', seated.gap == nil and math.abs(sat - 1.1) < 1e-9)
+  for _ = 1, 4 do
+    y, state = height.step(state, 1.0, 0.1, 0.9)
+  end
+  check('agreeing road readings lock the gap', state.gap ~= nil and math.abs(state.gap) < 1e-9 and math.abs(y - 1.0) < 1e-9)
+  local locked = state.gap
+  y, state = height.step(state, 4.0, -2, 0.9)
+  check('a later jump keeps that gap', state.gap == locked and math.abs(y - 4.0) < 1e-9)
+  local fresh = nil
+  local ignored, still = height.step(fresh, 5, 0, 0.9)
+  check('a high hit does not store a gap', still.gap == nil and math.abs(ignored - 5) < 1e-9)
+  local com = nil
+  local cy
+  cy, com = height.step(com, 10.9, 10.0, 0.15)
+  check('a high saved point still seats the tyres', com.gap == nil and math.abs(cy - 10.15) < 1e-9)
+  local sunk = nil
+  local sy
+  sy, sunk = height.step(sunk, 10.9, 8.4, 0.15)
+  check('a surface under the road is not the road', sunk.gap == nil and #sunk.samples == 0 and math.abs(sy - 10.9) < 1e-9)
 end
 
 local wipers = dofile('apps/lua/solo_tandems/wipers.lua')
