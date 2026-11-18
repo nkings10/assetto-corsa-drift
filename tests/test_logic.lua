@@ -392,13 +392,21 @@ end
 local car_data = dofile('apps/lua/solo_tandems/car_data.lua')
 
 do
-  local spec = car_data.parse('[CONTROLS]\nSTEER_LOCK=520\n', '[FRONT]\nRADIUS=0.31\n[REAR]\nRADIUS=0.34\n')
+  local spec = car_data.parse('[CONTROLS]\nSTEER_LOCK=520\nSTEER_RATIO=10\n', '[FRONT]\nRADIUS=0.31\n[REAR]\nRADIUS=0.34\n')
   check('the car file gives the steering lock', spec.steer_lock == 520)
   check('the car file gives the front tyre size', math.abs(spec.radius_front - 0.31) < 1e-9)
   check('the car file gives the rear tyre size', math.abs(spec.radius_rear - 0.34) < 1e-9)
+  check('the steer ratio sets the front tyre angle', math.abs(spec.tyre_angle - 52) < 1e-9)
+  local negative = car_data.parse('[CONTROLS]\nSTEER_LOCK=450\nSTEER_RATIO=-10\n', '')
+  check('a negative steer ratio still sets the tyre angle', math.abs(negative.tyre_angle - 45) < 1e-9)
   local plain = car_data.parse('', '')
   check('a missing car file keeps the old steering lock', plain.steer_lock == 450)
   check('a missing car file keeps the old tyre size', plain.radius_front == 0.33 and plain.radius_rear == 0.33)
+  check('a missing steer ratio keeps the old tyre angle', plain.tyre_angle == 32)
+  local shy = car_data.parse('[CONTROLS]\nSTEER_LOCK=450\nSTEER_RATIO=40\n', '')
+  local wide = car_data.parse('[CONTROLS]\nSTEER_LOCK=450\nSTEER_RATIO=5\n', '')
+  check('an out of range tyre angle keeps 32 degrees', shy.tyre_angle == 32 and wide.tyre_angle == 32)
+  check('the tyre angle bounds are kept', car_data.tyre_angle(15, 1) == 15 and car_data.tyre_angle(70, 1) == 70)
 end
 
 local car_lights = dofile('apps/lua/solo_tandems/car_lights.lua')

@@ -29,6 +29,7 @@ local loaded_id = nil
 local car_folder = nil
 local car_spec = {
   steer_lock = car_data.DEFAULT_LOCK,
+  tyre_angle = car_data.FALLBACK_TYRE_ANGLE,
   radius_front = car_data.DEFAULT_RADIUS,
   radius_rear = car_data.DEFAULT_RADIUS,
 }
@@ -1328,7 +1329,7 @@ function M.show(pose, dt)
     was_hidden = false
   end
 
-  local target_steer = (pose.steer or 0) * math.rad(32)
+  local target_steer = (pose.steer or 0) * math.rad(car_spec.tyre_angle or car_data.FALLBACK_TYRE_ANGLE)
   steer_smooth = steer_smooth + (target_steer - steer_smooth) * math.min(1, dt * 10)
   apply_steer_wheel((pose.steer or 0) * math.rad(car_spec.steer_lock))
 
