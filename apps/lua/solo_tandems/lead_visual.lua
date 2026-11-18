@@ -20,6 +20,7 @@ local wetness = sibling('wetness.lua')
 local height = sibling('height.lua')
 local wipers = sibling('wipers.lua')
 local smoke = sibling('smoke.lua')
+local wheel_spin = sibling('wheel_spin.lua')
 local light_data = nil
 
 local node = nil
@@ -1336,8 +1337,8 @@ function M.show(pose, dt)
   local spd = speed_ms(pose.vel)
   for i = 1, 4 do
     local radius = i <= 2 and car_spec.radius_front or car_spec.radius_rear
-    local omega = pose.wheels and pose.wheels[i] or 0
-    if math.abs(omega) < 0.01 then omega = spd / radius end
+    local saved = pose.wheels and pose.wheels[i]
+    local omega = wheel_spin.rate(saved, spd, radius)
     if spd < 0.3 then omega = 0 end
     spin[i] = (spin[i] + omega * dt) % 6.283185307179586
     if spd < 0.3 then spin[i] = 0 end

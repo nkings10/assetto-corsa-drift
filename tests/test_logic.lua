@@ -348,6 +348,16 @@ do
   check('a tunnel ceiling is ignored', math.abs(y - 10) < 0.05 and math.abs(lid.bias - lid_bias) < 1e-12)
 end
 
+local wheel_spin = dofile('apps/lua/solo_tandems/wheel_spin.lua')
+
+do
+  check('a locked wheel stays still', wheel_spin.rate(0, 20, 0.33) == 0)
+  check('a spinning wheel keeps its saved speed', math.abs(wheel_spin.rate(40, 10, 0.33) - 40) < 1e-9)
+  check('reverse keeps the saved wheel direction', math.abs(wheel_spin.rate(-12, 8, 0.33) + 12) < 1e-9)
+  check('a missing wheel speed rolls with the car', math.abs(wheel_spin.rate(nil, 10, 0.5) - 20) < 1e-9)
+  check('a missing wheel speed with no radius stays still', wheel_spin.rate(nil, 10, 0) == 0)
+end
+
 local wipers = dofile('apps/lua/solo_tandems/wipers.lua')
 
 do
