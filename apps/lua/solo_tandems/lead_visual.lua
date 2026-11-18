@@ -1002,9 +1002,10 @@ local function get_ground_y(world_pos)
   return from.y - dist
 end
 
-local function snap_y(recorded_y, world_xz, dt, speed_kmh)
+local function snap_y(recorded_y, world_xz, dt, speed_kmh, up_y)
   local ground = get_ground_y(vec3(world_xz.x, recorded_y, world_xz.z))
-  local y, state = height.step(height_state, recorded_y, ground, ground_offset, dt, speed_kmh)
+  local offset = height.pitched_offset(ground_offset, up_y)
+  local y, state = height.step(height_state, recorded_y, ground, offset, dt, speed_kmh)
   height_state = state
   return y
 end
@@ -1315,7 +1316,7 @@ function M.show(pose, dt)
   if side:length() < 0.001 then side = vec3(1, 0, 0) else side:normalize() end
 
   local raw = v3(pose.pos)
-  local y = snap_y(raw.y, raw, dt, pose.speed)
+  local y = snap_y(raw.y, raw, dt, pose.speed, up.y)
   local pos = vec3(raw.x, y, raw.z)
 
   node:setPosition(pos)

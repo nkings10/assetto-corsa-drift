@@ -1,13 +1,16 @@
 -- Ride height for the lead car on a road that changes angle.
 -- Wheel hubs say how high the model origin sits when the tyres touch.
 -- The lower axle wins, so a taller rear tyre is not pushed through the road.
--- While the saved point is close to that ride, the lead uses the saved height,
--- so a slope stays in the run. A larger gap eases toward the road, and the
--- lead cannot drop through the road in one frame.
+-- The ride is divided by how upright the car is, so a slope matches the saved height.
+-- While the saved point is within 15 cm of that ride, the lead uses the saved height.
+-- A larger gap, up to a metre, eases toward the road.
+-- A hit further away is ignored, and the lead cannot drop through the road in one frame.
 
 local M = {}
 
 local DEAD_ZONE = 0.15
+local FAR = 1
+local MIN_UP = 0.5
 local BIAS_SPEED = 4
 local MAX_DELTA = 0.35
 local SMOOTH_UP = 12
@@ -38,6 +41,14 @@ function M.average(values)
   return sum / count
 end
 
+function M.pitched_offset(offset, up_y)
+  if type(offset) ~= 'number' then return nil end
+  if type(up_y) ~= 'number' then return offset end
+  if up_y > 1 then up_y = 1 end
+  if up_y < MIN_UP then return offset end
+  return offset / up_y
+end
+
 function M.ride_offset(front, rear)
   local front_offset = M.average(front)
   local rear_offset = M.average(rear)
@@ -65,9 +76,12 @@ function M.step(state, recorded_y, ground, ground_offset, dt, speed_kmh)
   dt = clamp_dt(dt)
 
   local target
-  local on_road = type(ground) == 'number' and type(ground_offset) == 'number'
-  if on_road then
-    local diff = (ground + ground_offset) - recorded_y
+  local diff = nil
+  if type(ground) == 'number' and type(ground_offset) == 'number' then
+    diff = (ground + ground_offset) - recorded_y
+    if math.abs(diff) > FAR then diff = nil end
+  end
+  if diff ~= nil then
     local blend = math.min(1, dt * BIAS_SPEED)
     state.bias = state.bias + (diff - state.bias) * blend
     state.seen_road = true

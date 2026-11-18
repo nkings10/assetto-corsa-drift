@@ -296,26 +296,56 @@ do
   check('the lower axle sets the ride height', math.abs(height.ride_offset({ 0.40, 0.42 }, { 0.50, 0.48 }) - 0.49) < 1e-9)
   check('one axle is enough for the ride height', math.abs(height.ride_offset({}, { 0.47 }) - 0.47) < 1e-9)
   check('no hubs leaves the ride unset', height.ride_offset({}, {}) == nil)
+  local ride = 0.5
+  local upright = math.cos(math.rad(30))
+  local pitched = height.pitched_offset(ride, upright)
+  check('a slope stretches the ride', math.abs(pitched - (ride / upright)) < 1e-9)
+  check('a level car keeps the ride', height.pitched_offset(ride, 1) == ride)
+  check('a car on its side keeps the level ride', height.pitched_offset(ride, 0.2) == ride)
+  check('a missing lean keeps the ride', height.pitched_offset(ride, nil) == ride)
 
   local state = nil
   local y
-  -- Saved point 10, road contact wants 9.95. Six centimetres is a slope, not a correction.
+  -- Saved point 10, road contact wants 9.95. Five centimetres is inside the band.
   y, state = height.step(state, 10, 9.2, 0.75, 0.016, 40)
   check('a small slope keeps the saved height', math.abs(y - 10) < 1e-9)
   for _ = 1, 60 do
     y, state = height.step(state, 10.4, 9.6, 0.75, 0.016, 50)
   end
   check('a changing slope stays on the saved height', math.abs(y - 10.4) < 1e-4)
+  local seated = nil
+  y, seated = height.step(seated, 10, 10 - pitched, pitched, 0.016, 40)
+  check('a seated car on a slope keeps the saved height', math.abs(y - 10) < 1e-9)
   y, state = height.step(nil, 6, nil, 0.9, 0.016, 0)
   check('a missed road keeps the saved height', math.abs(y - 6) < 1e-9)
+  local buried = nil
+  y, buried = height.step(buried, 9.2, 9.2, 0.5, 0.016, 30)
+  check('a tyre in the road does not finish correcting in one frame', y > 9.2 and y < 9.5)
+  for _ = 1, 120 do
+    y, buried = height.step(buried, 9.2, 9.2, 0.5, 0.016, 30)
+  end
+  check('a tyre in the road eases up to the ride', math.abs(y - 9.7) < 0.05)
   local air = nil
   y, air = height.step(air, 10, 9.2, 0.75, 0.016, 40)
-  y, air = height.step(air, 12, 9.2, 0.75, 0.016, 80)
-  check('a jump does not drop to the road in one frame', y > 10 and y < 10.2)
+  local air_bias = air.bias
+  for _ = 1, 90 do
+    y, air = height.step(air, 13, 9.2, 0.75, 0.016, 80)
+  end
+  check('a jump stays on the saved height', math.abs(y - 13) < 0.05 and math.abs(air.bias - air_bias) < 1e-12)
   local low = nil
   y, low = height.step(low, 10, 9.2, 0.75, 0.016, 40)
-  y, low = height.step(low, 10, 7, 0.75, 0.016, 40)
-  check('a hit under the map does not drop the car in one frame', y > 9.5)
+  local low_bias = low.bias
+  for _ = 1, 90 do
+    y, low = height.step(low, 10, 7, 0.75, 0.016, 40)
+  end
+  check('a hit under the map is ignored', math.abs(y - 10) < 0.05 and math.abs(low.bias - low_bias) < 1e-12)
+  local lid = nil
+  y, lid = height.step(lid, 10, 9.2, 0.75, 0.016, 40)
+  local lid_bias = lid.bias
+  for _ = 1, 90 do
+    y, lid = height.step(lid, 10, 14, 0.75, 0.016, 40)
+  end
+  check('a tunnel ceiling is ignored', math.abs(y - 10) < 0.05 and math.abs(lid.bias - lid_bias) < 1e-12)
 end
 
 local wipers = dofile('apps/lua/solo_tandems/wipers.lua')
