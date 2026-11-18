@@ -21,6 +21,7 @@ local state = logic.create()
 local deck = nil
 local deck_link = { seen = false, seq = 0 }
 local recorded_car_id = nil
+local recorded_skin = ''
 local setup_loaded = false
 local run_name = 'run'
 local run_files = nil
@@ -33,7 +34,7 @@ local setup_selected = nil
 
 local settings = nil
 if ac.storage ~= nil then
-  local ok, stored = pcall(ac.storage, { runsFolder = '' }, 'soloTandems.')
+  local ok, stored = pcall(ac.storage, { runsFolder = '', contact = false }, 'soloTandems.')
   if ok then settings = stored end
 end
 
@@ -206,6 +207,18 @@ local function read_wheels(car)
   return wheels
 end
 
+local function read_slip(car)
+  local slip = { 0, 0, 0, 0 }
+  if car.wheels == nil then return slip end
+  for i = 0, 3 do
+    local wheel = car.wheels[i]
+    if wheel ~= nil and type(wheel.ndSlip) == 'number' then
+      slip[i + 1] = wheel.ndSlip
+    end
+  end
+  return slip
+end
+
 local function read_steer(car)
   local lock = car.steerLock
   if lock == nil or lock < 0.001 then return 0 end
@@ -262,6 +275,7 @@ local function read_pose(car)
     drift = read_drift(car, vel, dir),
     speed = car.speedKmh or math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z) * 3.6,
     wheels = read_wheels(car),
+    slip = read_slip(car),
     wipers = car.wiperProgress or 0,
     lights = {
       head = car.headlightsActive and 1 or 0,
@@ -296,6 +310,13 @@ local function player_car_id()
   local ok, id = pcall(ac.getCarID, 0)
   if ok and type(id) == 'string' and id ~= '' then return id end
   return nil
+end
+
+local function player_skin()
+  if ac.getCarSkin == nil then return '' end
+  local ok, name = pcall(ac.getCarSkin, 0)
+  if ok and type(name) == 'string' then return name end
+  return ''
 end
 
 local function setup_files(folder)
@@ -586,6 +607,7 @@ local function export_run()
   local payload, err = logic.pack(state, {
     carId = recorded_car_id or player_car_id() or '',
     trackId = track_id(),
+    skinName = recorded_skin,
   })
   if payload == nil then
     state.notice = err or 'Export failed'
@@ -635,6 +657,8 @@ local function import_run()
   if meta.carId ~= nil and meta.carId ~= '' then
     recorded_car_id = meta.carId
   end
+  recorded_skin = meta.skinName or ''
+  lead_visual.set_skin(recorded_skin)
   lead_visual.hide()
   if not ensure_lead() then
     state.notice = lead_visual.status()
@@ -652,6 +676,8 @@ local function press(action)
   end
   if action == logic.RECORD and state.recording then
     recorded_car_id = player_car_id()
+    recorded_skin = player_skin()
+    lead_visual.set_skin(recorded_skin)
   end
   if action == logic.CLEAR or (action == logic.RECORD and state.recording) then
     lead_visual.hide()
@@ -701,6 +727,7 @@ function script.update(dt)
     logic.capture(state, dt, read_pose(car))
   end
 
+  lead_visual.set_contact(settings ~= nil and settings.contact == true)
   local pose = logic.lead_position(state, dt)
   if pose == nil then
     lead_visual.hide()
@@ -710,13 +737,14 @@ function script.update(dt)
     end
     lead_visual.show(pose, dt)
   else
-    lead_visual.hide()
+    lead_visual.show_stand_in(pose, dt)
     state.notice = lead_visual.status()
   end
 end
 
 function script.draw3D()
   lead_visual.draw_glows()
+  lead_visual.draw_stand_in()
 end
 
 function script.windowMain(dt)
@@ -731,6 +759,14 @@ function script.windowMain(dt)
   ui.text(can_move() and 'Extended physics on' or 'Extended physics off (teleport only)')
   ui.text('Lead: ' .. tostring(lead_visual.status()))
   ui.text('Lead car: ' .. tostring(lead_car_id() or 'none'))
+  if ui.checkbox ~= nil then
+    local shown = settings ~= nil and settings.contact == true
+    ui.checkbox('Lead contact', shown)
+    if ui.itemClicked ~= nil and ui.itemClicked() then
+      if settings ~= nil then settings.contact = not shown end
+      lead_visual.set_contact(not shown)
+    end
+  end
 
   ui.separator()
   if ui.button('Record') then press(logic.RECORD) end

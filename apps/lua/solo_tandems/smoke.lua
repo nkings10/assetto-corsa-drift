@@ -10,6 +10,14 @@ function M.radius()
   return RADIUS
 end
 
+function M.intensity(slip)
+  if type(slip) ~= 'number' then return 0 end
+  if slip <= 1 then return 0 end
+  local amount = (slip - 1) / 3
+  if amount > 1 then return 1 end
+  return amount
+end
+
 function M.contact(pos, look, side, wheel, sign, radius)
   local drop = RADIUS
   if type(radius) == 'number' and radius > 0 then drop = radius end

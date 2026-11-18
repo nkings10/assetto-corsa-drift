@@ -582,6 +582,96 @@ do
   check('missing wheels keep the fixed rear offset', math.abs(lx - 10.72) < 1e-9 and math.abs(lz - 18.65) < 1e-9 and math.abs(rx - 9.28) < 1e-9 and math.abs(ry - ly) < 1e-9)
   local wx, wy, wz = smoke.contact(pos, look, side, { x = 4, y = 0.8, z = 7 }, 1)
   check('a found wheel is used for the smoke', math.abs(wx - 4) < 1e-9 and math.abs(wy - (0.8 - smoke.radius())) < 1e-9 and math.abs(wz - 7) < 1e-9)
+  check('grip stays quiet', smoke.intensity(1) == 0 and smoke.intensity(0.2) == 0)
+  check('a slide past the peak starts to smoke', smoke.intensity(1.3) > 0 and smoke.intensity(1.3) < 0.2)
+  check('a full slide is a full cloud', smoke.intensity(4) == 1 and smoke.intensity(7) == 1)
+  check('a missing slip stays quiet', smoke.intensity(nil) == 0)
+end
+
+local skin = dofile('apps/lua/solo_tandems/skin.lua')
+
+do
+  check('a dds file is a skin image', skin.is_image('livery.DDS'))
+  check('a text file is not a skin image', not skin.is_image('readme.txt'))
+  local map = skin.mapping({ 'Body.dds', 'Glass.dds' }, {
+    { name = 'body.dds', path = 'skins/body.dds' },
+    { name = 'extra.png', path = 'skins/extra.png' },
+  })
+  check('a skin matches the model texture by name', map['Body.dds'] == 'skins/body.dds' and map['Glass.dds'] == nil)
+  local fallback = skin.mapping({}, {
+    { name = 'body.dds', path = 'skins/body.dds' },
+  })
+  check('a skin with no texture list uses the file name', fallback['body.dds'] == 'skins/body.dds')
+end
+
+local touch = dofile('apps/lua/solo_tandems/touch.lua')
+
+do
+  local touching, play = touch.step(false, 0, true)
+  check('the first touch plays once', touching and play)
+  touching, play = touch.step(true, 0, true)
+  check('a rub stays quiet', touching and not play)
+  touching, play = touch.step(true, 0.05, false)
+  check('a short gap still counts as contact', touching and not play)
+  touching, play = touch.step(true, 0.2, false)
+  check('a clear gap arms the next touch', not touching and not play)
+end
+
+local stand = dofile('apps/lua/solo_tandems/stand.lua')
+
+do
+  local lines = stand.segments({ x = 0, y = 0, z = 0 }, { x = 0, y = 0, z = 1 })
+  local minx, maxx = math.huge, -math.huge
+  local miny, maxy = math.huge, -math.huge
+  local minz, maxz = math.huge, -math.huge
+  for i = 1, #lines do
+    for p = 1, 2 do
+      local point = lines[i][p]
+      if point.x < minx then minx = point.x end
+      if point.x > maxx then maxx = point.x end
+      if point.y < miny then miny = point.y end
+      if point.y > maxy then maxy = point.y end
+      if point.z < minz then minz = point.z end
+      if point.z > maxz then maxz = point.z end
+    end
+  end
+  check('the stand-in is the contact box', #lines == 15
+    and math.abs(minx + 0.5) < 1e-9 and math.abs(maxx - 0.5) < 1e-9
+    and math.abs(miny - 0.1) < 1e-9 and math.abs(maxy - 0.7) < 1e-9
+    and math.abs(minz + 1.5) < 1e-9)
+  check('the stand-in arrow points forward', math.abs(maxz - 2.3) < 1e-9)
+  local turned = stand.world({ x = 0, y = 0, z = 0 }, { x = 1, y = 0, z = 0 }, { x = 0, y = 0.4, z = 1.5 })
+  check('the stand-in follows the heading', math.abs(turned.x - 1.5) < 1e-9 and math.abs(turned.z) < 1e-9)
+end
+
+do
+  check('a dry track parks the wipers', wipers.period(0, 0) == nil)
+  check('a wet track with no rain sweeps slowly', wipers.period(0.4, 0) == 2.5)
+  check('rain sweeps faster as it gets heavier', math.abs(wipers.period(0.4, 0.02) - 1.49) < 1e-9 and wipers.period(1, 1) == 1)
+  check('a sweep goes out and back', wipers.sweep(0, 2.5) == 0 and wipers.sweep(1.25, 2.5) == 1 and wipers.sweep(2.5, 2.5) == 0)
+end
+
+do
+  local kept = wetness.exterior_names({ 'door', 'dash', 'glass' }, { 'dash' })
+  check('the cockpit stays out of the wet paint', #kept == 2 and kept[1] == 'door' and kept[2] == 'glass')
+end
+
+do
+  local state = logic.create()
+  logic.handle(state, logic.RECORD, two)
+  local sample = pose(0, 0, 0)
+  sample.slip = { 0.4, 1.2, 3, 5 }
+  logic.capture(state, 1 / 30, sample)
+  logic.handle(state, logic.RECORD, two)
+  local packed = logic.pack(state, { carId = 'ae86', trackId = 'test_track', skinName = 'red' })
+  local decoded = logic.decode(logic.encode(packed))
+  local other = logic.create()
+  local meta = logic.apply_pack(other, decoded, { trackId = 'test_track' })
+  check('a run keeps the skin folder', meta.skinName == 'red' and other.samples[1].slip[3] == 3)
+  check('a locked wheel stays in the run', other.samples[1].slip[1] == 0.4 and other.samples[1].slip[4] == 5)
+  logic.handle(other, logic.SPAWN, two)
+  local held = logic.lead_position(other, 0)
+  check('a waiting lead does not smoke', held.slip[3] == 0)
 end
 
 if failures > 0 then

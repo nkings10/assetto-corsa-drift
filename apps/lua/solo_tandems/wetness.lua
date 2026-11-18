@@ -7,6 +7,25 @@ local function num(v)
   return nil
 end
 
+function M.exterior_names(all_names, skip_names)
+  local skip = {}
+  if type(skip_names) == 'table' then
+    for i = 1, #skip_names do
+      local name = skip_names[i]
+      if type(name) == 'string' then skip[name] = true end
+    end
+  end
+  local kept = {}
+  if type(all_names) ~= 'table' then return kept end
+  for i = 1, #all_names do
+    local name = all_names[i]
+    if type(name) == 'string' and not skip[name] then
+      kept[#kept + 1] = name
+    end
+  end
+  return kept
+end
+
 function M.capture(body, tyres, read)
   local saved_body = {}
   local body_count = (type(body) == 'table' or type(body) == 'userdata') and #body or 0

@@ -110,6 +110,7 @@ local function pose_copy(pose)
     drift = pose.drift or 0,
     speed = pose.speed or 0,
     wheels = copy_wheels(pose.wheels),
+    slip = copy_wheels(pose.slip),
     wipers = pose.wipers or 0,
     lights = copy_lights(pose.lights),
   }
@@ -130,6 +131,7 @@ local function hold_pose(sample)
     drift = 0,
     speed = 0,
     wheels = { 0, 0, 0, 0 },
+    slip = { 0, 0, 0, 0 },
     wipers = sample.wipers or 0,
     lights = copy_lights(sample.lights),
   }
@@ -317,6 +319,7 @@ function M.lead_position(state, dt)
       drift = first.drift or 0,
       speed = first.speed or 0,
       wheels = copy_wheels(first.wheels),
+      slip = copy_wheels(first.slip),
       wipers = first.wipers or 0,
       lights = copy_lights(first.lights),
     }, 'play'
@@ -359,6 +362,7 @@ function M.lead_position(state, dt)
     drift = (a.drift or 0) + ((b.drift or 0) - (a.drift or 0)) * u,
     speed = (a.speed or 0) + ((b.speed or 0) - (a.speed or 0)) * u,
     wheels = lerp_wheels(a.wheels, b.wheels, u),
+    slip = lerp_wheels(a.slip, b.slip, u),
     wipers = (a.wipers or 0) + ((b.wipers or 0) - (a.wipers or 0)) * u,
     lights = copy_lights(a.lights),
   }, 'play'
@@ -522,6 +526,7 @@ function M.pack(state, meta)
     kind = 'solo_tandems',
     carId = meta.carId or '',
     trackId = meta.trackId or '',
+    skinName = meta.skinName or '',
     sampleCount = #samples,
     samples = samples,
   }
@@ -580,6 +585,7 @@ function M.apply_pack(state, payload, opts)
   return {
     carId = payload.carId or '',
     trackId = file_track,
+    skinName = payload.skinName or '',
   }
 end
 

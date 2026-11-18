@@ -21,12 +21,17 @@ local height = sibling('height.lua')
 local wipers = sibling('wipers.lua')
 local smoke = sibling('smoke.lua')
 local wheel_spin = sibling('wheel_spin.lua')
+local skin = sibling('skin.lua')
+local touch = sibling('touch.lua')
+local stand = sibling('stand.lua')
 local light_data = nil
 
 local node = nil
 local all_meshes = nil
 local ready = false
 local loaded_id = nil
+local loaded_kn5 = nil
+local skin_name = nil
 local car_folder = nil
 local car_spec = {
   steer_lock = car_data.DEFAULT_LOCK,
@@ -87,6 +92,13 @@ local sound_id = nil
 local smooth_rpm = 900
 local smooth_gas = 0
 local cockpit_volume = 0.4
+local wiper_time = 0
+local stand_in = nil
+local contact_on = false
+local contact_body = nil
+local contact_touching = false
+local contact_hit = 0
+local contact_sound = nil
 
 local glow_brake = {
   meshes = nil,
@@ -275,6 +287,42 @@ local function clear_wet_state()
   last_wet = -1
 end
 
+local function mesh_names(meshes)
+  local names = {}
+  if meshes == nil then return names end
+  for i = 1, #meshes do
+    local mesh_name = nil
+    pcall(function()
+      mesh_name = meshes:name(i)
+    end)
+    if type(mesh_name) == 'string' then
+      names[#names + 1] = mesh_name
+    end
+  end
+  return names
+end
+
+local function cockpit_mesh_names(root)
+  local node_names = {
+    'COCKPIT_HR', 'COCKPIT_LR', 'cockpit_hr', 'cockpit_lr',
+    'COCKPIT', 'cockpit', 'GEO_cockpit_HR', 'GEO_cockpit_LR',
+  }
+  for i = 1, #node_names do
+    local ok, found = pcall(function()
+      return root:findNodes(node_names[i])
+    end)
+    if ok and found ~= nil and #found > 0 then
+      local ok_meshes, meshes = pcall(function()
+        return found:findMeshes('?')
+      end)
+      if ok_meshes and meshes ~= nil and #meshes > 0 then
+        return mesh_names(meshes)
+      end
+    end
+  end
+  return {}
+end
+
 local function find_meshes(root)
   clear_wet_state()
   local function grab(patterns)
@@ -325,6 +373,13 @@ local function find_meshes(root)
   end)
   all_meshes = (ok_all and meshes) or nil
   exterior_meshes = all_meshes
+  if all_meshes ~= nil then
+    local outside = wetness.exterior_names(mesh_names(all_meshes), cockpit_mesh_names(root))
+    if #outside > 0 then
+      local kept = find_named_meshes(root, outside)
+      if kept ~= nil then exterior_meshes = kept end
+    end
+  end
   if brake_meshes == nil and all_meshes ~= nil then
     local names = {}
     for i = 1, #all_meshes do
@@ -444,8 +499,23 @@ local function apply_wiper_pose(progress, angle)
   end
 end
 
-local function update_wipers(pose)
-  local progress = wipers.progress(pose and pose.wipers)
+local function update_wipers(dt)
+  local wet, rain = 0, 0
+  if ac.getSim ~= nil then
+    local ok, sim = pcall(ac.getSim)
+    if ok and sim ~= nil then
+      wet = sim.rainWetness or 0
+      rain = sim.rainIntensity or 0
+    end
+  end
+  local period = wipers.period(wet, rain)
+  if period == nil then
+    wiper_time = 0
+    apply_wiper_pose(0, 0)
+    return
+  end
+  wiper_time = wiper_time + (dt or 0)
+  local progress = wipers.sweep(wiper_time, period)
   apply_wiper_pose(progress, wipers.angle(progress))
 end
 
@@ -825,116 +895,122 @@ local function wheel_world(index)
   return { x = point.x, y = point.y, z = point.z }
 end
 
+local function emit_wheel_smoke(wx, wy, wz, intensity, look, side, vel, speed, slip_sign)
+  local wheel_r = smoke.radius()
+  local wc_x, wc_y, wc_z = wx, wy + wheel_r, wz
+  local kick = speed * 0.012 * intensity
+  local kick_x, kick_z = -look.x * kick, -look.z * kick
+  local slip_x = side.x * slip_sign * speed * 0.006
+  local slip_z = side.z * slip_sign * speed * 0.006
+  local main_amount = 0.8 + intensity * 3.5
+  for burst = 1, 3 do
+    local angle
+    if burst == 1 then
+      angle = -math.pi / 2 + (math.random() - 0.5) * 1.2
+    elseif burst == 2 then
+      angle = math.pi * (0.5 + math.random() * 0.5)
+    else
+      angle = math.random() * math.pi * 2
+    end
+    local r_offset = wheel_r * (0.7 + math.random() * 0.6)
+    local along = math.cos(angle) * r_offset
+    local up = math.sin(angle) * r_offset
+    local lateral = (math.random() - 0.5) * 0.4
+    smoke_pos.x = wc_x - look.x * along + (math.random() - 0.5) * 0.15 + side.x * lateral
+    smoke_pos.y = wc_y + up
+    smoke_pos.z = wc_z - look.z * along + (math.random() - 0.5) * 0.15 + side.z * lateral
+    if smoke_pos.y < wy then smoke_pos.y = wy end
+    local out_x, out_y, out_z = smoke_pos.x - wc_x, smoke_pos.y - wc_y, smoke_pos.z - wc_z
+    local out_len = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z) + 0.001
+    local out_force = 0.5 + intensity * 1.0
+    smoke_vel.x = vel.x * 0.35 + kick_x + slip_x + (out_x / out_len) * out_force + (math.random() - 0.5) * 0.6
+    smoke_vel.y = 0.1 + math.random() * 0.2 + (out_y / out_len) * out_force * 0.3
+    smoke_vel.z = vel.z * 0.35 + kick_z + slip_z + (out_z / out_len) * out_force + (math.random() - 0.5) * 0.6
+    pcall(function()
+      smoke_main:emit(smoke_pos, smoke_vel, main_amount * (0.7 + math.random() * 0.6))
+    end)
+  end
+  if intensity <= 0.3 or smoke_heavy == nil then return end
+  local heavy_amount = (intensity - 0.3) * 4.0
+  for _ = 1, 2 do
+    local angle = math.random() * math.pi * 2
+    local r_offset = wheel_r * (0.5 + math.random() * 0.8)
+    local along = math.cos(angle) * r_offset
+    local up = math.sin(angle) * r_offset
+    smoke_pos.x = wc_x - look.x * along + side.x * (math.random() - 0.5) * 0.5
+    smoke_pos.y = math.max(wy, wc_y + up)
+    smoke_pos.z = wc_z - look.z * along + side.z * (math.random() - 0.5) * 0.5
+    local out_x, out_y, out_z = smoke_pos.x - wc_x, smoke_pos.y - wc_y, smoke_pos.z - wc_z
+    local out_len = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z) + 0.001
+    local out_force = 0.8 + intensity * 1.5
+    smoke_vel.x = vel.x * 0.45 + kick_x * 1.3 + slip_x * 1.5 + (out_x / out_len) * out_force + (math.random() - 0.5) * 0.8
+    smoke_vel.y = 0.15 + math.random() * 0.25 + (out_y / out_len) * out_force * 0.4
+    smoke_vel.z = vel.z * 0.45 + kick_z * 1.3 + slip_z * 1.5 + (out_z / out_len) * out_force + (math.random() - 0.5) * 0.8
+    pcall(function()
+      smoke_heavy:emit(smoke_pos, smoke_vel, heavy_amount)
+    end)
+  end
+end
+
 local function update_smoke(pose, look, side, pos, dt)
   ensure_smoke()
   if smoke_main == nil or pose == nil or pos == nil or look == nil or side == nil then return end
-  local drift = math.abs(pose.drift or 0)
   local speed = pose.speed or (speed_ms(pose.vel) * 3.6)
   if smoke_push ~= nil then
     smoke_push.position = pos
     if pose.vel then smoke_push.velocity = v3(pose.vel) end
   end
-  local now = os.preciseClock and os.preciseClock() or (smoke_clock + (dt or 0))
-  -- Match TandemGhost: ~120 Hz, 5° / 12 km/h thresholds, multi-burst around each rear wheel.
-  if drift <= 5 or speed <= 12 or now - smoke_clock < 0.008 then
-    return
+  local amounts = {}
+  local hottest = 0
+  for i = 1, 4 do
+    local amount = smoke.intensity(pose.slip and pose.slip[i])
+    amounts[i] = amount
+    if amount > hottest then hottest = amount end
   end
+  if hottest <= 0 then return end
+  local now = os.preciseClock and os.preciseClock() or (smoke_clock + (dt or 0))
+  if now - smoke_clock < 0.008 then return end
   smoke_clock = now
 
-  local intensity = clamp((drift - 5) / 35, 0, 1) * clamp((speed - 12) / 68, 0, 1)
-  local wheel_r = smoke.radius()
   local vel = v3(pose.vel)
-  local kick = speed * 0.012 * intensity
-  local kick_x, kick_z = -look.x * kick, -look.z * kick
   local slip_sign = (pose.drift or 0) > 0 and -1 or 1
-  local slip_x = side.x * slip_sign * speed * 0.006
-  local slip_z = side.z * slip_sign * speed * 0.006
-
-  local rl_x, rl_y, rl_z = smoke.contact(pos, look, side, wheel_world(3), 1, car_spec.radius_rear)
-  local rr_x, rr_y, rr_z = smoke.contact(pos, look, side, wheel_world(4), -1, car_spec.radius_rear)
-
-  local main_amount = 0.8 + intensity * 3.5
-  for i = 1, 2 do
-    local wx, wy, wz
-    if i == 1 then
-      wx, wy, wz = rl_x, rl_y, rl_z
-    else
-      wx, wy, wz = rr_x, rr_y, rr_z
-    end
-    local wc_x, wc_y, wc_z = wx, wy + wheel_r, wz
-    for burst = 1, 3 do
-      local angle
-      if burst == 1 then
-        angle = -math.pi / 2 + (math.random() - 0.5) * 1.2
-      elseif burst == 2 then
-        angle = math.pi * (0.5 + math.random() * 0.5)
-      else
-        angle = math.random() * math.pi * 2
+  local rear = {}
+  for i = 1, 4 do
+    if amounts[i] > 0 then
+      local sign = (i == 1 or i == 3) and 1 or -1
+      local radius = i <= 2 and car_spec.radius_front or car_spec.radius_rear
+      local wheel = wheel_world(i)
+      if wheel ~= nil then
+        local wx, wy, wz = smoke.contact(pos, look, side, wheel, sign, radius)
+        emit_wheel_smoke(wx, wy, wz, amounts[i], look, side, vel, speed, slip_sign)
+        if i >= 3 then rear[#rear + 1] = { x = wx, y = wy, z = wz, amount = amounts[i] } end
       end
-      local r_offset = wheel_r * (0.7 + math.random() * 0.6)
-      local along = math.cos(angle) * r_offset
-      local up = math.sin(angle) * r_offset
-      local lateral = (math.random() - 0.5) * 0.4
-      smoke_pos.x = wc_x - look.x * along + (math.random() - 0.5) * 0.15 + side.x * lateral
-      smoke_pos.y = wc_y + up
-      smoke_pos.z = wc_z - look.z * along + (math.random() - 0.5) * 0.15 + side.z * lateral
-      if smoke_pos.y < wy then smoke_pos.y = wy end
-      local out_x, out_y, out_z = smoke_pos.x - wc_x, smoke_pos.y - wc_y, smoke_pos.z - wc_z
-      local out_len = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z) + 0.001
-      local out_force = 0.5 + intensity * 1.0
-      smoke_vel.x = vel.x * 0.35 + kick_x + slip_x + (out_x / out_len) * out_force + (math.random() - 0.5) * 0.6
-      smoke_vel.y = 0.1 + math.random() * 0.2 + (out_y / out_len) * out_force * 0.3
-      smoke_vel.z = vel.z * 0.35 + kick_z + slip_z + (out_z / out_len) * out_force + (math.random() - 0.5) * 0.6
-      pcall(function()
-        smoke_main:emit(smoke_pos, smoke_vel, main_amount * (0.7 + math.random() * 0.6))
-      end)
     end
   end
-
-  if intensity > 0.3 and smoke_heavy ~= nil then
-    local heavy_amount = (intensity - 0.3) * 4.0
-    for i = 1, 2 do
-      local wx, wy, wz
-      if i == 1 then
-        wx, wy, wz = rl_x, rl_y, rl_z
-      else
-        wx, wy, wz = rr_x, rr_y, rr_z
-      end
-      local wc_x, wc_y, wc_z = wx, wy + wheel_r, wz
-      for _ = 1, 2 do
-        local angle = math.random() * math.pi * 2
-        local r_offset = wheel_r * (0.5 + math.random() * 0.8)
-        local along = math.cos(angle) * r_offset
-        local up = math.sin(angle) * r_offset
-        smoke_pos.x = wc_x - look.x * along + side.x * (math.random() - 0.5) * 0.5
-        smoke_pos.y = math.max(wy, wc_y + up)
-        smoke_pos.z = wc_z - look.z * along + side.z * (math.random() - 0.5) * 0.5
-        local out_x, out_y, out_z = smoke_pos.x - wc_x, smoke_pos.y - wc_y, smoke_pos.z - wc_z
-        local out_len = math.sqrt(out_x * out_x + out_y * out_y + out_z * out_z) + 0.001
-        local out_force = 0.8 + intensity * 1.5
-        smoke_vel.x = vel.x * 0.45 + kick_x * 1.3 + slip_x * 1.5 + (out_x / out_len) * out_force + (math.random() - 0.5) * 0.8
-        smoke_vel.y = 0.15 + math.random() * 0.25 + (out_y / out_len) * out_force * 0.4
-        smoke_vel.z = vel.z * 0.45 + kick_z * 1.3 + slip_z * 1.5 + (out_z / out_len) * out_force + (math.random() - 0.5) * 0.8
-        pcall(function()
-          smoke_heavy:emit(smoke_pos, smoke_vel, heavy_amount)
-        end)
-      end
-    end
-    if intensity > 0.6 then
-      local c_x = (rl_x + rr_x) * 0.5
-      local c_y = (rl_y + rr_y) * 0.5
-      local c_z = (rl_z + rr_z) * 0.5
-      smoke_pos.x = c_x - look.x * 0.2 + (math.random() - 0.5) * 0.4
-      smoke_pos.y = c_y + math.random() * 0.06
-      smoke_pos.z = c_z - look.z * 0.2 + (math.random() - 0.5) * 0.4
-      smoke_vel.x = vel.x * 0.45 + kick_x * 1.5 + (math.random() - 0.5) * 0.6
-      smoke_vel.y = 0.08 + math.random() * 0.2
-      smoke_vel.z = vel.z * 0.45 + kick_z * 1.5 + (math.random() - 0.5) * 0.6
-      pcall(function()
-        smoke_heavy:emit(smoke_pos, smoke_vel, heavy_amount * 0.8)
-      end)
-    end
+  local rear_hot = 0
+  for i = 1, #rear do
+    if rear[i].amount > rear_hot then rear_hot = rear[i].amount end
   end
+  if rear_hot <= 0.6 or #rear == 0 or smoke_heavy == nil then return end
+  local c_x, c_y, c_z = 0, 0, 0
+  for i = 1, #rear do
+    c_x = c_x + rear[i].x
+    c_y = c_y + rear[i].y
+    c_z = c_z + rear[i].z
+  end
+  c_x, c_y, c_z = c_x / #rear, c_y / #rear, c_z / #rear
+  local kick = speed * 0.012 * rear_hot
+  local kick_x, kick_z = -look.x * kick, -look.z * kick
+  local heavy_amount = (rear_hot - 0.3) * 4.0
+  smoke_pos.x = c_x - look.x * 0.2 + (math.random() - 0.5) * 0.4
+  smoke_pos.y = c_y + math.random() * 0.06
+  smoke_pos.z = c_z - look.z * 0.2 + (math.random() - 0.5) * 0.4
+  smoke_vel.x = vel.x * 0.45 + kick_x * 1.5 + (math.random() - 0.5) * 0.6
+  smoke_vel.y = 0.08 + math.random() * 0.2
+  smoke_vel.z = vel.z * 0.45 + kick_z * 1.5 + (math.random() - 0.5) * 0.6
+  pcall(function()
+    smoke_heavy:emit(smoke_pos, smoke_vel, heavy_amount * 0.8)
+  end)
 end
 
 local function world_y(ref)
@@ -1141,6 +1217,113 @@ local function update_sound(pose, look, pos)
   end)
 end
 
+local function skin_files(dir)
+  local files = {}
+  if io == nil or io.scanDir == nil then return files end
+  local found = io.scanDir(dir, '*')
+  if type(found) ~= 'table' then return files end
+  for i = 1, #found do
+    local name = tostring(found[i]):gsub('/+$', '')
+    if skin.is_image(name) then
+      files[#files + 1] = { name = name, path = dir .. '/' .. name }
+    end
+  end
+  return files
+end
+
+local function apply_recorded_skin()
+  if node == nil or loaded_id == nil then return end
+  if type(skin_name) ~= 'string' or skin_name == '' then return end
+  if ac.getFolder == nil or ac.FolderID == nil or ac.FolderID.ContentCars == nil then return end
+  local cars = ac.getFolder(ac.FolderID.ContentCars)
+  if type(cars) ~= 'string' or cars == '' then return end
+  local dir = cars .. '/' .. loaded_id .. '/skins/' .. skin_name
+  if io ~= nil and io.dirExists ~= nil and io.dirExists(dir) ~= true then return end
+  local textures = nil
+  if loaded_kn5 ~= nil and ac.collectKN5TextureNames ~= nil then
+    local ok, names = pcall(ac.collectKN5TextureNames, loaded_kn5)
+    if ok and type(names) == 'table' then textures = names end
+  end
+  local mapping = skin.mapping(textures, skin_files(dir))
+  if next(mapping) == nil then return end
+  pcall(function()
+    node:applySkin(mapping)
+  end)
+end
+
+function M.set_skin(name)
+  if type(name) == 'string' then skin_name = name else skin_name = nil end
+  apply_recorded_skin()
+end
+
+local function play_contact_sound()
+  if contact_sound == nil and ac.AudioEvent ~= nil and ac.getCarID ~= nil then
+    local ok, snd = pcall(ac.AudioEvent, '/cars/' .. ac.getCarID(0) .. '/crash', true)
+    if ok then contact_sound = snd end
+  end
+  if contact_sound == nil or contact_body == nil then return end
+  pcall(function()
+    contact_sound:setPosition(contact_body:localPosToWorld(vec3(0, 0, 0)))
+    contact_sound:start()
+  end)
+end
+
+local function ensure_contact()
+  if contact_body ~= nil or physics == nil or physics.RigidBody == nil or physics.Collider == nil then return end
+  local ok, body = pcall(function()
+    local colliders = {
+      physics.Collider.Box(vec3(1.0, 0.6, 3.0), vec3(0, 0.4, 0), vec3(0, 0, 1), vec3(0, 1, 0), false),
+    }
+    return physics.RigidBody(colliders, 5, vec3(0, 0.4, 0), true, true)
+  end)
+  if not ok or body == nil then return end
+  contact_body = body
+  pcall(function()
+    contact_body:setSemiDynamic(true)
+    contact_body:setInWorld(false)
+    contact_body:onCollision(function()
+      if not contact_on then return end
+      local now = os.clock()
+      local touching, play = touch.step(contact_touching, 0, true)
+      contact_touching = touching
+      contact_hit = now
+      if play then play_contact_sound() end
+    end)
+  end)
+end
+
+local function place_contact(pos, look)
+  if not contact_on then
+    if contact_body ~= nil then
+      pcall(function() contact_body:setInWorld(false) end)
+    end
+    contact_touching = false
+    return
+  end
+  ensure_contact()
+  if contact_body == nil or mat4x4 == nil then return end
+  local now = os.clock()
+  contact_touching = touch.step(contact_touching, now - contact_hit, false)
+  pcall(function()
+    contact_body:setInWorld(true)
+    local flat_x, flat_z = look.x, look.z
+    local len = math.sqrt(flat_x * flat_x + flat_z * flat_z)
+    if len < 0.01 then
+      flat_x, flat_z = 0, 1
+    else
+      flat_x, flat_z = flat_x / len, flat_z / len
+    end
+    local transform = mat4x4.rotation(math.atan2(flat_x, flat_z), vec3(0, 1, 0))
+    transform.row4 = vec4(pos.x, pos.y, pos.z, 1)
+    contact_body:setTransformation(transform, true)
+  end)
+end
+
+function M.set_contact(on)
+  contact_on = on == true
+  if not contact_on then place_contact(nil, nil) end
+end
+
 function M.is_model_notice(text)
   return model_notice.is_notice(text)
 end
@@ -1166,6 +1349,8 @@ end
 function M.ensure(car_id)
   if car_id == nil or car_id == '' then
     status = model_notice.message('no-car', car_id)
+    drop_node()
+    ready = false
     return false
   end
   if ready and loaded_id == car_id and node ~= nil then
@@ -1173,6 +1358,8 @@ function M.ensure(car_id)
   end
   ready = false
   loaded_id = car_id
+  loaded_kn5 = nil
+  ground_offset = nil
   stop_sound()
   dispose_brake_lights()
   dispose_running_lights()
@@ -1220,6 +1407,7 @@ function M.ensure(car_id)
     end)
     if ok_load and meshes ~= nil and #meshes > 0 then
       loaded = meshes
+      loaded_kn5 = path
       break
     end
   end
@@ -1246,6 +1434,7 @@ function M.ensure(car_id)
   ready = true
   was_hidden = true
   height_state = nil
+  apply_recorded_skin()
   status = 'ok ' .. tostring(path:match('[^/\\]+$') or path)
   return true
 end
@@ -1287,6 +1476,14 @@ local function update_signal_lights(state)
 end
 
 function M.hide()
+  stand_in = nil
+  wiper_time = 0
+  if contact_body ~= nil then
+    pcall(function()
+      contact_body:setInWorld(false)
+    end)
+  end
+  contact_touching = false
   if node ~= nil then
     pcall(function()
       node:setPosition(vec3(0, -1000, 0))
@@ -1360,7 +1557,7 @@ function M.show(pose, dt)
     end
   end
 
-  update_wipers(pose)
+  update_wipers(dt)
   local recorded_lights = pose.lights or {}
   local head_on = recorded_lights.head == 1
   local high_on = recorded_lights.high == 1
@@ -1380,6 +1577,42 @@ function M.show(pose, dt)
   update_smoke(pose, look, side, pos, dt)
   update_wetness()
   update_sound(pose, look, pos)
+  stand_in = nil
+  place_contact(pos, look)
+end
+
+local function frame_of(pose, dt)
+  dt = dt or 0.016
+  if dt > 0.1 then dt = 0.1 end
+  if dt < 0 then dt = 0 end
+  local look = v3(pose.dir, vec3(0, 0, 1))
+  if look:length() > 0.001 then look:normalize() else look = vec3(0, 0, 1) end
+  local up = v3(pose.up, vec3(0, 1, 0))
+  if up:length() > 0.001 then up:normalize() else up = vec3(0, 1, 0) end
+  local raw = v3(pose.pos)
+  local y = snap_y(raw.y, raw, dt, pose.speed, up.y)
+  return vec3(raw.x, y, raw.z), look
+end
+
+function M.show_stand_in(pose, dt)
+  if pose == nil then
+    M.hide()
+    return
+  end
+  local pos, look = frame_of(pose, dt)
+  stand_in = { pos = { x = pos.x, y = pos.y, z = pos.z }, look = { x = look.x, y = look.y, z = look.z } }
+  place_contact(pos, look)
+end
+
+function M.draw_stand_in()
+  if stand_in == nil or render == nil or render.debugLine == nil then return end
+  local lines = stand.segments(stand_in.pos, stand_in.look)
+  local color = rgbm(0.75, 0.9, 1, 1)
+  for i = 1, #lines do
+    local a = lines[i][1]
+    local b = lines[i][2]
+    pcall(render.debugLine, vec3(a.x, a.y, a.z), vec3(b.x, b.y, b.z), color)
+  end
 end
 
 function M.draw_glows()
