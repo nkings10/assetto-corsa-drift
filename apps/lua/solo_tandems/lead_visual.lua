@@ -86,6 +86,7 @@ local sound_bank = nil
 local sound_id = nil
 local smooth_rpm = 900
 local smooth_gas = 0
+local cockpit_volume = 0.4
 
 local glow_brake = {
   meshes = nil,
@@ -1115,6 +1116,8 @@ local function update_sound(pose, look, pos)
           sound.volume = 0.4
           sound:setPosition(pos, look, nil, v3(pose.vel))
           sound:start()
+          sound.cameraExteriorMultiplier = 1
+          sound.cameraInteriorMultiplier = cockpit_volume
         end)
         break
       end
@@ -1133,6 +1136,8 @@ local function update_sound(pose, look, pos)
     sound:setParam('throttle', smooth_gas)
     sound:setParam('gear', pose.gear or 3)
     sound.volume = 0.25 + smooth_gas * 0.25
+    sound.cameraExteriorMultiplier = 1
+    sound.cameraInteriorMultiplier = cockpit_volume
   end)
 end
 
