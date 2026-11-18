@@ -1361,11 +1361,12 @@ function M.show(pose, dt)
   local high_on = recorded_lights.high == 1
   set_running_lights(head_on, high_on)
   update_running_lights(look, up, side, pos)
-  set_brake_visual((pose.brake or 0) > 0.08, look, up, side, pos)
+  local braking = (pose.brake or 0) >= 0.05
+  set_brake_visual(braking, look, up, side, pos)
   update_signal_lights({
     head = head_on and 1 or 0,
     high = high_on and 1 or 0,
-    brake = (pose.brake or 0) > 0.08 and 1 or 0,
+    brake = braking and 1 or 0,
     reverse = (pose.gear or 0) < 0 and 1 or 0,
     left = recorded_lights.left,
     right = recorded_lights.right,
